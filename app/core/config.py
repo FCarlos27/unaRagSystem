@@ -6,9 +6,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
+    # Kept for compatibility with NVIDIA API deployments (currently unused).
     nvidia_api_key: str = ""
-    nvidia_embed_model: str = "nvidia/Nemotron-3-Embed-1B"
-    nvidia_llm_model: str = "deepseek-ai/DeepSeek-R1-Distill-8B"
+
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_embed_model: str = "nomic-embed-text"
+    ollama_llm_model: str = "llama3.2:3b"
 
     chroma_db_dir: str = "data/chroma_db"
     chroma_collection_name: str = "unasucre_documents"

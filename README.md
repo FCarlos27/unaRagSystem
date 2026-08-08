@@ -6,8 +6,8 @@ Retrieval-Augmented Generation (RAG). See [PRD.MD](./PRD.MD).
 ## Tech Stack
 
 - **Backend:** FastAPI (Python)
-- **Embeddings:** Nemotron-3-Embed-1B via NVIDIA API
-- **LLM:** DeepSeek-R1-Distill-8B via NVIDIA API
+- **Embeddings:** nomic-embed-text (local via Ollama)
+- **LLM:** Llama-3.2-3B (local via Ollama)
 - **Vector DB:** ChromaDB (local)
 - **Orchestration:** LangChain
 - **PDF parsing:** PyPDF2
@@ -37,12 +37,18 @@ Retrieval-Augmented Generation (RAG). See [PRD.MD](./PRD.MD).
 
 ## Setup
 
-1. `cp .env.example .env` and set your `NVIDIA_API_KEY`.
-2. Drop official PDFs into `data/raw_pdfs/`.
-3. Ingest documents: `python scripts/ingest.py`.
-4. Run the API: `uvicorn app.main:app --reload` or `docker compose up --build`.
+1. Ensure Ollama is running locally and the models are available:
+   `ollama pull nomic-embed-text` and `ollama pull llama3.2:3b`
+2. `cp .env.example .env`.
+3. Drop official PDFs into `data/raw_pdfs/`.
+4. Ingest documents: `python scripts/ingest.py`.
+5. Run the API: `uvicorn app.main:app --reload` or `docker compose up --build`.
 
 ## API
 
 - `POST /api/v1/query` — body: `{"query": "¿Cuáles son los requisitos de inscripción?"}`
+  - Omit `session_id` to start a new conversation (one is returned in the response).
+  - Reuse the returned `session_id` to keep conversation context for follow-up questions.
 - `GET /health`
+
+Conversation history is stored in memory (resets on restart).

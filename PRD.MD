@@ -52,8 +52,8 @@
 | :--- | :--- | :--- |
 | **Backend Framework** | FastAPI (Python) | [cite_start]Lightweight, asynchronous, and excellent for building RESTful microservices[cite: 306]. |
 | **Vector Database** | ChromaDB (Local) | [cite_start]ChromaDB is ideal for a local, containerized MVP without external DB costs[cite: 307]. |
-| **Embedding Model** | Nemotron-3-Embed-1B (via NVIDIA API) | Optimized for multilingual/semantic search, supports Spanish, hosted remotely so no local GPU is required. |
-| **LLM / AI API** | DeepSeek-R1-Distill-8B (via NVIDIA API) | Cost-effective reasoning model capable of following strict hallucination-control prompts and Spanish generation. |
+| **Embedding Model** | nomic-embed-text (local via Ollama) | Lightweight local embedding model (274 MB) with strong multilingual/semantic search performance and no external API costs. |
+| **LLM / AI API** | Llama-3.2-3B (local via Ollama) | Lightweight local generative model capable of following strict hallucination-control prompts and Spanish generation, with no external API costs. |
 | **Orchestration** | LangChain | [cite_start]Standard framework for routing RAG pipelines and managing document retrieval[cite: 309]. |
 | **PDF Parsing** | PyPDF2 | Lightweight, dependency-free library for extracting text from official university PDFs. |
 | **Text Chunking** | RecursiveCharacterTextSplitter (LangChain) | Splits documents into overlapping, semantically coherent chunks ideal for retrieval. |

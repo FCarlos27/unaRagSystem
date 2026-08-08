@@ -1,3 +1,10 @@
+import sys
+from pathlib import Path
+
+if __name__ == "__main__":
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import uvicorn
 from fastapi import FastAPI
 
 from app.api.routes.query import router as query_router
@@ -17,3 +24,7 @@ app.include_router(query_router)
 @app.get("/health", tags=["health"])
 def health_check() -> dict:
     return {"status": "ok"}
+
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)

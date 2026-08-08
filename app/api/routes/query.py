@@ -13,8 +13,15 @@ router = APIRouter(prefix="/api/v1", tags=["query"])
 def handle_query(request: QueryRequest) -> QueryResponse:
     try:
         engine = get_rag_engine()
-        answer, sources, confidence = engine.answer(request.query)
-        return QueryResponse(answer=answer, sources=sources, confidence=confidence)
+        answer, sources, confidence, session_id = engine.answer(
+            request.query, request.session_id
+        )
+        return QueryResponse(
+            answer=answer,
+            sources=sources,
+            confidence=confidence,
+            session_id=session_id,
+        )
     except Exception as exc:
         logger.exception("Failed to answer query")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
