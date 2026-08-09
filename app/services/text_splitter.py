@@ -1,5 +1,6 @@
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+from app.services.table_extractor import extract_contact_table_entries
 from app.utils.logging import get_logger
 
 logger = get_logger("text_splitter")
@@ -14,12 +15,30 @@ def split_documents(documents: list[dict], chunk_size: int, chunk_overlap: int) 
 
     chunks = []
     for doc in documents:
+        if doc["metadata"].get("prechunked"):
+            chunks.append(
+                {
+                    "page_content": doc["page_content"],
+                    "metadata": {**doc["metadata"], "chunk_index": len(chunks)},
+                }
+            )
+            continue
+
+        table_entries = extract_contact_table_entries(doc["page_content"], doc["metadata"]["source"])
+        for entry in table_entries:
+            chunks.append(
+                {
+                    "page_content": entry["page_content"],
+                    "metadata": {**entry["metadata"], "chunk_index": len(chunks)},
+                }
+            )
+
         pieces = splitter.split_text(doc["page_content"])
-        for i, piece in enumerate(pieces):
+        for piece in pieces:
             chunks.append(
                 {
                     "page_content": piece,
-                    "metadata": {**doc["metadata"], "chunk_index": i},
+                    "metadata": {**doc["metadata"], "chunk_index": len(chunks)},
                 }
             )
     logger.info("Split %d documents into %d chunks", len(documents), len(chunks))

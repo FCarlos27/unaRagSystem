@@ -1,7 +1,7 @@
 """Ingestion script: load PDFs, chunk, embed, and store in ChromaDB."""
 
 from app.core.config import get_settings
-from app.services.document_loader import load_pdfs
+from app.services.document_loader import load_documents
 from app.services.embeddings import build_embeddings
 from app.services.text_splitter import split_documents
 from app.services.vector_store import build_vector_store
@@ -13,7 +13,7 @@ logger = setup_logging()
 def main() -> None:
     settings = get_settings()
 
-    documents = load_pdfs(settings.raw_pdfs_dir)
+    documents = load_documents(settings.raw_pdfs_dir)
     if not documents:
         logger.warning("No PDFs found in %s", settings.raw_pdfs_dir)
         return
