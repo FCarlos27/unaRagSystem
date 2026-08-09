@@ -138,5 +138,7 @@ def load_json_files(directory: str) -> list[dict]:
     return documents
 
 
-def load_documents(directory: str) -> list[dict]:
-    return load_pdfs(directory) + load_json_files(directory)
+def load_documents(
+    pdfs_directory: str, json_directory: str | None = None
+) -> list[dict]:
+    return load_pdfs(pdfs_directory) + load_json_files(json_directory or pdfs_directory)

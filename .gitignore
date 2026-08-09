@@ -10,6 +10,8 @@ env/
 
 data/raw_pdfs/*
 !data/raw_pdfs/.gitkeep
+data/json_docs/*
+!data/json_docs/.gitkeep
 data/chroma_db/*
 !data/chroma_db/.gitkeep
 

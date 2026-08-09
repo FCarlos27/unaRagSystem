@@ -13,8 +13,22 @@ from app.services.embeddings import build_embeddings
 from app.services.llm import build_llm, generate_answer, reformulate_query
 from app.services.vector_store import build_vector_store
 from app.utils.logging import get_logger
+from app.utils.unanswered_log import ensure_log_dir, log_unanswered
 
 logger = get_logger("rag_engine")
+
+
+def _declined_answer(answer_text: str) -> bool:
+    declined = (
+        "no puedo",
+        "no pude",
+        "no puedo determinar",
+        "no tengo la información",
+        "no se proporciona información",
+        "no se indica",
+        "no dispongo",
+    )
+    return any(marker in answer_text.lower() for marker in declined)
 
 
 def _contact_score(value: str) -> tuple[int, int, int]:
@@ -132,6 +146,7 @@ class RagEngine:
             answer_text = "No pude encontrar información relevante."
             sources: list[str] = []
             confidence = 0.0
+            self._log_unanswered(query, session_id, reason="no_context")
         else:
             sources = sorted({doc.metadata.get("source", "desconocido") for doc in docs})
             direct = self._direct_contact_answer(query)
@@ -142,10 +157,27 @@ class RagEngine:
                 context = "\n\n".join(doc.page_content for doc in docs)
                 answer_text = generate_answer(self.llm, query, context, history_text)
                 confidence = 1.0
+                if _declined_answer(answer_text):
+                    self._log_unanswered(
+                        query, session_id, sources=sources, reason="declined_with_context"
+                    )
 
         chat_sessions.add_user_message(session_id, query)
         chat_sessions.add_ai_message(session_id, answer_text)
         return answer_text, sources, confidence, session_id
+
+    def _log_unanswered(
+        self,
+        query: str,
+        session_id: str,
+        sources: list[str] | None = None,
+        reason: str = "no_context",
+    ) -> None:
+        path = self.settings.unanswered_log_path
+        if not path:
+            return
+        ensure_log_dir(path)
+        log_unanswered(path, query, session_id, sources, reason)
 
 
 @lru_cache

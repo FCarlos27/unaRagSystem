@@ -13,7 +13,7 @@ logger = setup_logging()
 def main() -> None:
     settings = get_settings()
 
-    documents = load_documents(settings.raw_pdfs_dir)
+    documents = load_documents(settings.raw_pdfs_dir, settings.json_docs_dir)
     if not documents:
         logger.warning("No PDFs found in %s", settings.raw_pdfs_dir)
         return
