@@ -5,6 +5,9 @@ __pycache__/
 venv/
 env/
 
+# Local test chat widget
+app/static/
+
 .env
 .env.local
 

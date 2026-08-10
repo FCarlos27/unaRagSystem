@@ -1,5 +1,8 @@
 """Ingestion script: load PDFs, chunk, embed, and store in ChromaDB."""
 
+import argparse
+import sys
+
 from app.core.config import get_settings
 from app.services.document_loader import load_documents
 from app.services.embeddings import build_embeddings
@@ -11,27 +14,51 @@ logger = setup_logging()
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Ingest documents into ChromaDB.")
+    parser.add_argument(
+        "--source",
+        help="Re-index only this source file (deletes its existing chunks first).",
+    )
+    args = parser.parse_args()
+
     settings = get_settings()
+    source = args.source
 
     documents = load_documents(settings.raw_pdfs_dir, settings.json_docs_dir)
     if not documents:
-        logger.warning("No PDFs found in %s", settings.raw_pdfs_dir)
+        logger.warning("No documents found in %s / %s", settings.raw_pdfs_dir, settings.json_docs_dir)
         return
+
+    if source:
+        documents = [doc for doc in documents if doc["metadata"].get("source") == source]
+        if not documents:
+            logger.warning("No documents loaded for source %s", source)
+            return
+        vector_store = build_vector_store(settings, build_embeddings(settings))
+        vector_store.delete(where={"source": source})
+        logger.info("Deleted existing chunks for source %s", source)
+    else:
+        vector_store = build_vector_store(settings, build_embeddings(settings))
 
     chunks = split_documents(
         documents,
         chunk_size=settings.chunk_size,
         chunk_overlap=settings.chunk_overlap,
     )
-
-    embeddings = build_embeddings(settings)
-    vector_store = build_vector_store(settings, embeddings)
+    if not chunks:
+        logger.warning("No chunks produced for source %s", source or "all documents")
+        return
 
     vector_store.add_texts(
         texts=[chunk["page_content"] for chunk in chunks],
         metadatas=[chunk["metadata"] for chunk in chunks],
     )
-    logger.info("Indexed %d chunks into %s", len(chunks), settings.chroma_collection_name)
+    logger.info(
+        "Indexed %d chunks from %s into %s",
+        len(chunks),
+        source or f"{len(documents)} documents",
+        settings.chroma_collection_name,
+    )
 
 
 if __name__ == "__main__":
