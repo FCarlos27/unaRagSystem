@@ -24,6 +24,7 @@ REFORMULATE_PROMPT = (
 
 
 def build_llm(settings: Settings) -> ChatOllama:
+    """Create the Ollama chat model configured from settings."""
     return ChatOllama(
         base_url=settings.ollama_base_url,
         model=settings.ollama_llm_model,
@@ -32,6 +33,7 @@ def build_llm(settings: Settings) -> ChatOllama:
 
 
 def generate_answer(llm, question: str, context: str, history: str = "") -> str:
+    """Generate an answer grounded strictly on the retrieved context."""
     preamble = f"Conversación anterior:\n{history}\n\n" if history else ""
     instruction = (
         "Instrucción: si el contexto contiene una tabla de contactos con columnas "
@@ -51,6 +53,7 @@ def generate_answer(llm, question: str, context: str, history: str = "") -> str:
 
 
 def reformulate_query(llm, question: str, history: str) -> str:
+    """Reframe a follow-up question into a standalone query using chat history."""
     messages = [
         ("system", REFORMULATE_PROMPT),
         (

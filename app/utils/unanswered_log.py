@@ -17,6 +17,7 @@ def log_unanswered(
     sources: list[str] | None = None,
     reason: str = "no_context",
 ) -> None:
+    """Append one unanswered-query record as a JSON line."""
     if not path:
         return
     record = {
@@ -35,6 +36,7 @@ def log_unanswered(
 
 
 def ensure_log_dir(path: str) -> None:
+    """Create the parent directory of a log file if missing."""
     parent = Path(path).parent
     if str(parent) not in ("", "."):
         parent.mkdir(parents=True, exist_ok=True)

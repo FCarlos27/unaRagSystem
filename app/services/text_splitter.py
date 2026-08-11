@@ -7,6 +7,7 @@ logger = get_logger("text_splitter")
 
 
 def split_documents(documents: list[dict], chunk_size: int, chunk_overlap: int) -> list[dict]:
+    """Chunk documents; passes prechunked entries through and splits the rest."""
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,

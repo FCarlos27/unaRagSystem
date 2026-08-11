@@ -17,6 +17,7 @@ data/json_docs/*
 !data/json_docs/.gitkeep
 data/chroma_db/*
 !data/chroma_db/.gitkeep
+data/unanswered_queries.jsonl
 
 *.log
 .DS_Store

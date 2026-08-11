@@ -44,11 +44,13 @@ EMAIL_RE = re.compile(
 
 
 def _has_email(token: str) -> bool:
+    """Return True if a token looks like an email fragment."""
     low = token.lower()
     return any(k in low for k in ("mail", "hotmail", "una.edu", ".com"))
 
 
 def _find_centro(line: str) -> str | None:
+    """Return the centro local name present in a line, if any."""
     upper = line.upper()
     for name in CENTRO_LOCALES:
         if name in upper:
@@ -57,10 +59,12 @@ def _find_centro(line: str) -> str | None:
 
 
 def _row_tokens(line: str) -> list[str]:
+    """Split a table row into meaningful tokens, dropping separator glyphs."""
     return [t for t in TOKEN.findall(line) if t not in SEPARATORS]
 
 
 def _parse_row(line: str, centro: str) -> dict | None:
+    """Parse a contact row into centro, jefe, and coordinator entries."""
     emails = [m.strip() for m in EMAIL_RE.findall(line)]
     if not emails:
         return None
@@ -78,6 +82,7 @@ def _parse_row(line: str, centro: str) -> dict | None:
 
 
 def extract_contact_table_entries(text: str, source: str) -> list[dict]:
+    """Rebuild clean contact-table chunks from the OCR'd Secretaría table."""
     entries = []
     upper = text.upper()
     marker = upper.find("CORREOS ELECTRONICOS")

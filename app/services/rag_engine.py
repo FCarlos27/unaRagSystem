@@ -19,6 +19,7 @@ logger = get_logger("rag_engine")
 
 
 def _declined_answer(answer_text: str) -> bool:
+    """Detect when the LLM refused to answer despite having retrieved context."""
     declined = (
         "no puedo",
         "no pude",
@@ -32,11 +33,14 @@ def _declined_answer(answer_text: str) -> bool:
 
 
 def _contact_score(value: str) -> tuple[int, int, int]:
+    """Score an OCR contact value; prefers a domain, few spaces, then longest."""
     has_domain = 0 if any(marker in value for marker in ("@", ".com", ".org", ".edu", ".net")) else 1
     return (has_domain, value.count(" "), -len(value))
 
 
 ROLE_KEYWORDS = ("coordinador", "jefe de registro", "registro y control")
+BANK_KEYWORDS = ("banco", "bancaria", "bancarias", "cuenta bancaria", "cuentas bancarias", "pago de arancel", "pagar arancel")
+BANK_SOURCE = "Bancos_autorizados.json"
 CENTRO_ALIASES = {
     "sucre": "Sucre",
     "carabobo": "Carabobo",
@@ -73,10 +77,12 @@ class RagEngine:
         self.vector_store = build_vector_store(settings, embeddings)
 
     def retrieve(self, query: str, top_k: int | None = None) -> list[Document]:
+        """Semantic similarity search over the vector store."""
         top_k = top_k or self.settings.retrieval_top_k
         return self.vector_store.similarity_search(query, k=top_k)
 
     def _contact_table(self) -> dict[str, dict[str, str]]:
+        """Build centro-local -> {Coordinador, Jefe} map from the contact table."""
         docs = self.vector_store.similarity_search(
             "coordinador centro local correo",
             k=1000,
@@ -106,7 +112,41 @@ class RagEngine:
                     row[label] = value
         return table
 
+    def _banks(self) -> list[tuple[str, str, str]]:
+        """Return authorized (bank, account_type, account_number) from the bank JSON."""
+        docs = self.vector_store.similarity_search(
+            "banco cuenta corriente pago",
+            k=1000,
+            filter={"source": BANK_SOURCE},
+        )
+        banks: list[tuple[str, str, str]] = []
+        for doc in docs:
+            bank = doc.metadata.get("entidad_bancaria")
+            account_type = doc.metadata.get("tipo_cuenta", "")
+            account_number = doc.metadata.get("numero_cuenta", "")
+            if bank and account_number:
+                banks.append((bank, account_type, account_number))
+        return sorted(banks)
+
+    def _direct_bank_answer(self, query: str) -> str | None:
+        """Deterministic answer listing authorized banks when query is about payments."""
+        low = query.lower()
+        if not any(k in low for k in BANK_KEYWORDS):
+            return None
+        banks = self._banks()
+        if not banks:
+            return None
+        lines = []
+        for bank, account_type, account_number in banks:
+            label = f"{bank} ({account_type})" if account_type else bank
+            lines.append(f"- {label}: {account_number}")
+        return (
+            "Según el instructivo de la UNA, las cuentas bancarias autorizadas "
+            "para el pago de aranceles son las siguientes:\n" + "\n".join(lines)
+        )
+
     def _direct_contact_answer(self, query: str) -> str | None:
+        """Deterministic answer for coordinator/jefe queries per centro local."""
         low = query.lower()
         is_role_query = any(k in low for k in ROLE_KEYWORDS)
         if not is_role_query:
@@ -133,6 +173,7 @@ class RagEngine:
     def answer(
         self, query: str, session_id: str | None = None
     ) -> tuple[str, list[str], float, str]:
+        """Full RAG flow: reformulate, retrieve, deterministic override or LLM."""
         session_id = session_id or new_session_id()
         history = chat_sessions.get_or_create(session_id)
         history_text = format_history(history)
@@ -149,7 +190,7 @@ class RagEngine:
             self._log_unanswered(query, session_id, reason="no_context")
         else:
             sources = sorted({doc.metadata.get("source", "desconocido") for doc in docs})
-            direct = self._direct_contact_answer(query)
+            direct = self._direct_bank_answer(query) or self._direct_contact_answer(query)
             if direct:
                 answer_text = direct
                 confidence = 0.9
@@ -173,6 +214,7 @@ class RagEngine:
         sources: list[str] | None = None,
         reason: str = "no_context",
     ) -> None:
+        """Append an unanswered-query record to the JSONL log (FR5)."""
         path = self.settings.unanswered_log_path
         if not path:
             return
@@ -182,6 +224,7 @@ class RagEngine:
 
 @lru_cache
 def get_rag_engine() -> RagEngine:
+    """Build (and cache) a single RagEngine wired to settings, embeddings, and LLM."""
     settings = get_settings()
     embeddings = build_embeddings(settings)
     llm = build_llm(settings)
