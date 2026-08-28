@@ -4,15 +4,17 @@ from pathlib import Path
 if __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 
 import uvicorn
-from fastapi import FastAPI
 
-from app.api.routes.query import router as query_router
-from app.utils.logging import setup_logging
+from app.schemas.query import QueryRequest, QueryResponse
+from app.services.rag_engine import get_rag_engine
+from app.utils.logging import setup_logging, get_logger
 
 logger = setup_logging()
+query_logger = get_logger("query_route")
 
 app = FastAPI(
     title="UNASUCRE/UNASEC RAG Microservice",
@@ -20,7 +22,23 @@ app = FastAPI(
     version="0.1.0",
 )
 
-app.include_router(query_router)
+
+@app.post("/api/v1/query", response_model=QueryResponse)
+def handle_query(request: QueryRequest) -> QueryResponse:
+    try:
+        engine = get_rag_engine()
+        answer, sources, confidence, session_id = engine.answer(
+            request.query, request.session_id
+        )
+        return QueryResponse(
+            answer=answer,
+            sources=sources,
+            confidence=confidence,
+            session_id=session_id,
+        )
+    except Exception as exc:
+        query_logger.exception("Failed to answer query")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.get("/health", tags=["health"])

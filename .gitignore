@@ -13,11 +13,15 @@ app/static/
 
 data/raw_pdfs/*
 !data/raw_pdfs/.gitkeep
+data/raw_docx/*
+!data/raw_docx/.gitkeep
 data/json_docs/*
 !data/json_docs/.gitkeep
 data/chroma_db/*
 !data/chroma_db/.gitkeep
 data/unanswered_queries.jsonl
+data/web_docs/*
+!data/web_docs/.gitkeep
 
 *.log
 .DS_Store
