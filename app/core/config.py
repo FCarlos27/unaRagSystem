@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     retrieval_top_k: int = 4
 
     raw_pdfs_dir: str = "data/raw_pdfs"
+    raw_docx_dir: str = "data/raw_docx"
     json_docs_dir: str = "data/json_docs"
 
     unanswered_log_path: str = "data/unanswered_queries.jsonl"

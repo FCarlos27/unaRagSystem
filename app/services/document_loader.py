@@ -1,89 +1,51 @@
 import json
-from io import BytesIO
 from pathlib import Path
 
-import fitz
-import pytesseract
-from PIL import Image
-from PyPDF2 import PdfReader
+from docx import Document
 
 from app.utils.logging import get_logger
 
 logger = get_logger("document_loader")
 
-OCR_LANGUAGE = "spa"
-MIN_OCR_IMAGE_SIZE = 256
+
+def _load_docx(docx_path: Path) -> str:
+    """Extract paragraph and table text from a .docx file."""
+    doc = Document(str(docx_path))
+    text_parts = []
+    for para in doc.paragraphs:
+        if para.text.strip():
+            text_parts.append(para.text)
+    for table in doc.tables:
+        for row in table.rows:
+            cells = [cell.text.strip() for cell in row.cells if cell.text.strip()]
+            if cells:
+                text_parts.append("\t".join(cells))
+    return "\n".join(text_parts)
 
 
-def _ocr_image_bytes(image_bytes: bytes) -> str:
-    """Run Tesseract OCR on raw image bytes; returns text or '' on failure."""
-    try:
-        image = Image.open(BytesIO(image_bytes))
-        if min(image.size) < MIN_OCR_IMAGE_SIZE:
-            logger.debug("Skipping small image %s", image.size)
-            return ""
-        return pytesseract.image_to_string(image, lang=OCR_LANGUAGE).strip()
-    except Exception as exc:
-        logger.warning("OCR failed for image: %s", exc)
-        return ""
-
-
-def _extract_page_images(pdf_doc: fitz.Document, page, page_number: int) -> str:
-    """Extract and OCR all images embedded in a single PDF page."""
-    ocr_parts = []
-    for img_index, img in enumerate(page.get_images(full=True)):
-        xref = img[0]
-        try:
-            base_image = pdf_doc.extract_image(xref)
-            ocr_text = _ocr_image_bytes(base_image["image"])
-            if ocr_text:
-                ocr_parts.append(
-                    f"[Texto extraído de la imagen {img_index + 1} "
-                    f"en la página {page_number}]:\n{ocr_text}"
-                )
-        except Exception as exc:
-            logger.warning("Failed to extract image xref %s: %s", xref, exc)
-    return "\n\n".join(ocr_parts)
-
-
-def _load_pdf(pdf_path: Path) -> str:
-    """Read a PDF's text layer plus OCR'd text from its embedded images."""
-    reader = PdfReader(str(pdf_path))
-    pages_text = [page.extract_text() or "" for page in reader.pages]
-
-    pdf_doc = fitz.open(str(pdf_path))
-    try:
-        for page_number, page in enumerate(pdf_doc, start=1):
-            ocr_text = _extract_page_images(pdf_doc, page, page_number)
-            if ocr_text:
-                pages_text[page_number - 1] += f"\n\n{ocr_text}"
-    finally:
-        pdf_doc.close()
-
-    return "\n".join(pages_text)
-
-
-def load_pdfs(directory: str) -> list[dict]:
-    """Load every PDF in a directory into raw text documents."""
+def load_docx_files(directory: str) -> list[dict]:
+    """Load every .docx file in a directory into raw text documents."""
     documents = []
-    pdf_dir = Path(directory)
-    if not pdf_dir.exists():
-        logger.warning("PDF directory %s does not exist", directory)
+    docx_dir = Path(directory)
+    if not docx_dir.exists():
+        logger.warning("DOCX directory %s does not exist", directory)
         return documents
 
-    for pdf_path in sorted(pdf_dir.glob("*.pdf")):
-        logger.info("Loading %s", pdf_path.name)
+    for docx_path in sorted(docx_dir.glob("*.docx")):
+        if docx_path.name.startswith("~$"):
+            continue
+        logger.info("Loading %s", docx_path.name)
         try:
-            text = _load_pdf(pdf_path)
+            text = _load_docx(docx_path)
             if text.strip():
                 documents.append(
                     {
                         "page_content": text,
-                        "metadata": {"source": pdf_path.name},
+                        "metadata": {"source": docx_path.name},
                     }
                 )
         except Exception as exc:
-            logger.error("Failed to parse %s: %s", pdf_path.name, exc)
+            logger.error("Failed to parse %s: %s", docx_path.name, exc)
 
     return documents
 
@@ -169,7 +131,7 @@ def load_json_files(directory: str) -> list[dict]:
 
 
 def load_documents(
-    pdfs_directory: str, json_directory: str | None = None
+    docx_dir: str, json_dir: str | None = None
 ) -> list[dict]:
-    """Load all PDFs and JSON documents from the given directories."""
-    return load_pdfs(pdfs_directory) + load_json_files(json_directory or pdfs_directory)
+    """Load all DOCX and JSON documents from the given directories."""
+    return load_docx_files(docx_dir) + load_json_files(json_dir or docx_dir)

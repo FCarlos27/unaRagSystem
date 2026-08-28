@@ -1,4 +1,4 @@
-"""Ingestion script: load PDFs, chunk, embed, and store in ChromaDB."""
+"""Ingestion script: load DOCX files, chunk, embed, and store in ChromaDB."""
 
 import argparse
 import sys
@@ -24,9 +24,9 @@ def main() -> None:
     settings = get_settings()
     source = args.source
 
-    documents = load_documents(settings.raw_pdfs_dir, settings.json_docs_dir)
+    documents = load_documents(settings.raw_docx_dir, settings.json_docs_dir)
     if not documents:
-        logger.warning("No documents found in %s / %s", settings.raw_pdfs_dir, settings.json_docs_dir)
+        logger.warning("No documents found in %s / %s", settings.raw_docx_dir, settings.json_docs_dir)
         return
 
     if source:
