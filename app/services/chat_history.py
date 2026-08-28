@@ -22,12 +22,15 @@ class ChatSessionStore:
     def get_or_create(self, session_id: str) -> InMemoryChatMessageHistory:
         """Return a session's history, creating it (and evicting the oldest) if needed."""
         with self._lock:
-            if session_id not in self._sessions:
-                if len(self._sessions) >= self._max_sessions:
-                    oldest = next(iter(self._sessions))
-                    self._sessions.pop(oldest)
-                    logger.info("Evicted oldest session %s", oldest)
-                self._sessions[session_id] = InMemoryChatMessageHistory()
+            if session_id in self._sessions:
+                history = self._sessions.pop(session_id)
+                self._sessions[session_id] = history
+                return history
+            if len(self._sessions) >= self._max_sessions:
+                oldest = next(iter(self._sessions))
+                self._sessions.pop(oldest)
+                logger.info("Evicted oldest session %s", oldest)
+            self._sessions[session_id] = InMemoryChatMessageHistory()
             return self._sessions[session_id]
 
     def add_user_message(self, session_id: str, content: str) -> None:
