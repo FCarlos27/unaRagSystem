@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     chroma_collection_name: str = "unasucre_documents"
 
     chunk_size: int = 1000
-    chunk_overlap: int = 200
+    chunk_overlap: int = 180
     retrieval_top_k: int = 4
 
     raw_pdfs_dir: str = "data/raw_pdfs"

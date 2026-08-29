@@ -5,17 +5,20 @@ from app.utils.logging import get_logger
 
 logger = get_logger("llm")
 
-SYSTEM_PROMPT = (
-    "Eres un asistente de la Universidad Nacional (UNASUCRE/UNASEC). "
-    "Responde en español basándote ÚNICAMENTE en el contexto proporcionado. "
-    "Si el contexto no contiene la información necesaria, responde que no puedes "
-    "responder con certeza y no inventes información. "
-)
+SYSTEM_PROMPT = ("""Eres un asistente de IA preciso y útil para el Centro Local Sucre (UNASUCRE) de la Universidad Nacional Abierta 
+Responde a la pregunta del usuario utilizando ÚNICAMENTE el contexto proporcionado.
+
+Reglas de respuesta:
+1. Si la respuesta se encuentra en tablas, listas o directorios de contacto (como correos, coordinadores o jefes de departamento), extrae y presenta la información de forma explícita sin omitir detalles.
+2. Si la información no está presente en el contexto, indica amablemente que no dispones de esos datos.
+3. Sé conciso, directo y mantén un tono profesional.""")
 
 REFORMULATE_PROMPT = (
-    "Convierte la pregunta actual en una pregunta autónoma e independiente, "
-    "resolviendo pronombres y referencias ambiguas usando la conversación anterior. "
-    "Responde solo con la pregunta reformulada, sin texto adicional."
+    "Dada una conversación anterior y una pregunta actual del usuario, "
+    "reformula la pregunta actual para que sea una consulta autónoma e independiente "
+    "en español, resolviendo todos los pronombres y referencias implícitas. "
+    "NO respondas a la pregunta; simplemente reformula la consulta si es necesario. "
+    "Responde ÚNICAMENTE con la pregunta reformulada, sin explicaciones ni texto adicional."
 )
 
 
@@ -37,33 +40,45 @@ def build_embeddings(settings: Settings) -> OllamaEmbeddings:
 
 def generate_answer(llm, question: str, context: str, history: str = "") -> str:
     """Generate an answer grounded strictly on the retrieved context."""
-    preamble = f"Conversación anterior:\n{history}\n\n" if history else ""
-    instruction = (
-        "Instrucción: si el contexto contiene una tabla de contactos con columnas "
-        "'Coordinador(a)' o 'Jefe de Registro y Control de Estudios' para el Centro "
-        "Local consultado, indica el valor de la columna relevante tal como aparece "
-        "(puede ser un correo sin nombre). No lo omitas."
-    )
+    user_content_parts = []
+    
+    if history:
+        user_content_parts.append(f"Conversación anterior:\n{history}")
+        
+    user_content_parts.append(f"Contexto:\n{context}")
+    user_content_parts.append(f"Pregunta:\n{question}")
+    
+    user_message = "\n\n".join(user_content_parts)
+    
     messages = [
         ("system", SYSTEM_PROMPT),
-        (
-            "user",
-            f"{preamble}{instruction}\n\nContexto:\n{context}\n\nPregunta:\n{question}",
-        ),
+        ("user", user_message),
     ]
+    
     response = llm.invoke(messages)
     return response.content
 
 
 def reformulate_query(llm, question: str, history: str) -> str:
     """Reframe a follow-up question into a standalone query using chat history."""
+    if not history or not history.strip():
+        return question.strip()
+    
     messages = [
         ("system", REFORMULATE_PROMPT),
         (
             "user",
-            f"Conversación anterior:\n{history}\n\nPregunta actual:\n{question}\n\n"
+            f"Conversación anterior:\n{history}\n\n"
+            f"Pregunta actual:\n{question}\n\n"
             "Pregunta reformulada:",
         ),
     ]
-    response = llm.invoke(messages)
-    return response.content.strip()
+    
+    try:
+        response = llm.invoke(messages)
+        standalone_query = response.content.strip()
+        logger.info("Reformulated query: '%s' -> '%s'", question, standalone_query)
+        return standalone_query
+    except Exception as e:
+        logger.warning("Query reformulation failed (%s); falling back to raw question", e)
+        return question.strip()
