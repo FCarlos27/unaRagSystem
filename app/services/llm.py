@@ -1,4 +1,4 @@
-from langchain_ollama import ChatOllama
+from langchain_ollama import ChatOllama, OllamaEmbeddings
 
 from app.core.config import Settings
 from app.utils.logging import get_logger
@@ -10,10 +10,6 @@ SYSTEM_PROMPT = (
     "Responde en español basándote ÚNICAMENTE en el contexto proporcionado. "
     "Si el contexto no contiene la información necesaria, responde que no puedes "
     "responder con certeza y no inventes información. "
-    "Si el contexto incluye una tabla de contactos con una columna 'Coordinador(a)' "
-    "o 'Jefe de Registro y Control de Estudios', reporta el valor de esa columna "
-    "para el Centro Local consultado tal como aparece, aunque sea solo un correo "
-    "o parezca un buzón genérico; aclara que no se indica el nombre si ese es el caso."
 )
 
 REFORMULATE_PROMPT = (
@@ -29,6 +25,13 @@ def build_llm(settings: Settings) -> ChatOllama:
         base_url=settings.ollama_base_url,
         model=settings.ollama_llm_model,
         temperature=0.1,
+    )
+
+def build_embeddings(settings: Settings) -> OllamaEmbeddings:
+    """Create the Ollama embedding model configured from settings."""
+    return OllamaEmbeddings(
+        base_url=settings.ollama_base_url,
+        model=settings.ollama_embed_model,
     )
 
 

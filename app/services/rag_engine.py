@@ -9,8 +9,7 @@ from app.services.chat_history import (
     format_history,
     new_session_id,
 )
-from app.services.embeddings import build_embeddings
-from app.services.llm import build_llm, generate_answer, reformulate_query
+from app.services.llm import build_llm, generate_answer, reformulate_query, build_embeddings
 from app.services.vector_store import build_vector_store
 from app.utils.logging import get_logger
 from app.utils.unanswered_log import ensure_log_dir, log_unanswered

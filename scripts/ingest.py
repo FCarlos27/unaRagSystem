@@ -1,11 +1,10 @@
 """Ingestion script: load DOCX files, chunk, embed, and store in ChromaDB."""
 
 import argparse
-import sys
 
 from app.core.config import get_settings
 from app.services.document_loader import load_documents
-from app.services.embeddings import build_embeddings
+from app.services.llm import build_embeddings
 from app.services.text_splitter import split_documents
 from app.services.vector_store import build_vector_store
 from app.utils.logging import setup_logging
