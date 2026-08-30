@@ -9,10 +9,10 @@ from app.services.chat_history import (
     format_history,
     new_session_id,
 )
-from app.services.llm import build_llm, generate_answer, reformulate_query, build_embeddings
+
+from app.services.llm import build_chat_llm, generate_answer, reformulate_query, build_embeddings_llm
 from app.services.vector_store import build_vector_store
 from app.utils.logging import get_logger
-from app.utils.unanswered_log import ensure_log_dir, log_unanswered
 
 logger = get_logger("rag_engine")
 
@@ -30,201 +30,52 @@ def _declined_answer(answer_text: str) -> bool:
     )
     return any(marker in answer_text.lower() for marker in declined)
 
-
-def _contact_score(value: str) -> tuple[int, int, int]:
-    """Score an OCR contact value; prefers a domain, few spaces, then longest."""
-    has_domain = 0 if any(marker in value for marker in ("@", ".com", ".org", ".edu", ".net")) else 1
-    return (has_domain, value.count(" "), -len(value))
-
-
-ROLE_KEYWORDS = ("coordinador", "jefe de registro", "registro y control")
-BANK_KEYWORDS = ("banco", "bancaria", "bancarias", "cuenta bancaria", "cuentas bancarias", "pago de arancel", "pagar arancel")
-BANK_SOURCE = "Bancos_autorizados.json"
-CENTRO_ALIASES = {
-    "sucre": "Sucre",
-    "carabobo": "Carabobo",
-    "metropolitano": "Metropolitano",
-    "nueva esparta": "Nueva Esparta",
-    "anzoategui": "Anzoátegui",
-    "apure": "Apure",
-    "aragua": "Aragua",
-    "barinas": "Barinas",
-    "bolivar": "Bolívar",
-    "cojedes": "Cojedes",
-    "falcon": "Falcón",
-    "guarico": "Guárico",
-    "lara": "Lara",
-    "merida": "Mérida",
-    "monagas": "Monagas",
-    "portuguesa": "Portuguesa",
-    "tachira": "Táchira",
-    "trujillo": "Trujillo",
-    "yaracuy": "Yaracuy",
-    "zulia": "Zulia",
-}
-
-
 class RagEngine:
-    def __init__(
-        self,
-        settings: Settings,
-        embeddings: OllamaEmbeddings,
-        llm: ChatOllama,
-    ) -> None:
+    def __init__(self, settings: Settings, embeddings_llm: OllamaEmbeddings, chat_llm: ChatOllama) -> None:
         self.settings = settings
-        self.llm = llm
-        self.vector_store = build_vector_store(settings, embeddings)
+        self.chat_llm = chat_llm
+        self.vector_store = build_vector_store(settings, embeddings_llm)
 
     def retrieve(self, query: str, top_k: int | None = None) -> list[Document]:
         """Semantic similarity search over the vector store."""
-        top_k = top_k or self.settings.retrieval_top_k
-        return self.vector_store.similarity_search(query, k=top_k)
+        k = top_k or self.settings.retrieval_top_k
+        return self.vector_store.similarity_search(query, k=k)
 
-    def _contact_table(self) -> dict[str, dict[str, str]]:
-        """Build centro-local -> {Coordinador, Jefe} map from the contact table."""
-        docs = self.vector_store.similarity_search(
-            "coordinador centro local correo",
-            k=1000,
-            filter={"table": "contactos"},
-        )
-        table: dict[str, dict[str, str]] = {}
-        for doc in docs:
-            lines = doc.page_content.splitlines()
-            centro_entry = next(
-                (ln.split(":", 1)[1].strip().rstrip(".") for ln in lines
-                 if ln.lower().startswith("centro local:")),
-                None,
-            )
-            if not centro_entry:
-                continue
-            row = table.setdefault(centro_entry.lower(), {})
-            for label in ("Coordinador(a)", "Jefe de Registro y Control de Estudios"):
-                value = next(
-                    (ln.split(":", 1)[1].strip().rstrip(".") for ln in lines
-                     if ln.startswith(label)),
-                    None,
-                )
-                if value and (
-                    label not in row
-                    or _contact_score(value) < _contact_score(row[label])
-                ):
-                    row[label] = value
-        return table
-
-    def _banks(self) -> list[tuple[str, str, str]]:
-        """Return authorized (bank, account_type, account_number) from the bank JSON."""
-        docs = self.vector_store.similarity_search(
-            "banco cuenta corriente pago",
-            k=1000,
-            filter={"source": BANK_SOURCE},
-        )
-        banks: list[tuple[str, str, str]] = []
-        for doc in docs:
-            bank = doc.metadata.get("entidad_bancaria")
-            account_type = doc.metadata.get("tipo_cuenta", "")
-            account_number = doc.metadata.get("numero_cuenta", "")
-            if bank and account_number:
-                banks.append((bank, account_type, account_number))
-        return sorted(banks)
-
-    def _direct_bank_answer(self, query: str) -> str | None:
-        """Deterministic answer listing authorized banks when query is about payments."""
-        low = query.lower()
-        if not any(k in low for k in BANK_KEYWORDS):
-            return None
-        banks = self._banks()
-        if not banks:
-            return None
-        lines = []
-        for bank, account_type, account_number in banks:
-            label = f"{bank} ({account_type})" if account_type else bank
-            lines.append(f"- {label}: {account_number}")
-        return (
-            "Según el instructivo de la UNA, las cuentas bancarias autorizadas "
-            "para el pago de aranceles son las siguientes:\n" + "\n".join(lines)
-        )
-
-    def _direct_contact_answer(self, query: str) -> str | None:
-        """Deterministic answer for coordinator/jefe queries per centro local."""
-        low = query.lower()
-        is_role_query = any(k in low for k in ROLE_KEYWORDS)
-        if not is_role_query:
-            return None
-        centro_asked = next(
-            (label for alias, label in CENTRO_ALIASES.items() if alias in low),
-            None,
-        )
-        if not centro_asked:
-            return None
-
-        want_jefe = "jefe" in low
-        label = "Jefe de Registro y Control de Estudios" if want_jefe else "Coordinador(a)"
-        row = self._contact_table().get(centro_asked.lower())
-        value = row.get(label) if row else None
-        if value:
-            return (
-                f"Según la tabla de contactos de la Secretaría, el {label} "
-                f"del Centro Local {centro_asked} es {value}. "
-                "El documento indica el correo de contacto, pero no el nombre."
-            )
-        return None
-
-    def answer(
-        self, query: str, session_id: str | None = None
-    ) -> tuple[str, list[str], float, str]:
-        """Full RAG flow: reformulate, retrieve, deterministic override or LLM."""
+    def answer(self, query: str, session_id: str | None = None) -> tuple[str, list[str], float, str]:
+        """Core RAG execution: Reformulate -> Retrieve -> Generate."""
         session_id = session_id or new_session_id()
         history = chat_sessions.get_or_create(session_id)
         history_text = format_history(history)
 
-        search_query = query
-        if history_text:
-            search_query = reformulate_query(self.llm, query, history_text)
+        # 1. Query Reformulation
+        search_query = reformulate_query(self.chat_llm, query, history_text) if history_text else query
 
+        # 2. Retrieval
         docs = self.retrieve(search_query)
         if not docs:
-            answer_text = "No pude encontrar información relevante."
-            sources: list[str] = []
-            confidence = 0.0
             self._log_unanswered(query, session_id, reason="no_context")
-        else:
-            sources = sorted({doc.metadata.get("source", "desconocido") for doc in docs})
-            direct = self._direct_bank_answer(query) or self._direct_contact_answer(query)
-            if direct:
-                answer_text = direct
-                confidence = 0.9
-            else:
-                context = "\n\n".join(doc.page_content for doc in docs)
-                answer_text = generate_answer(self.llm, query, context, history_text)
-                confidence = 1.0
-                if _declined_answer(answer_text):
-                    self._log_unanswered(
-                        query, session_id, sources=sources, reason="declined_with_context"
-                    )
+            return "No pude encontrar información relevante.", [], 0.0, session_id
 
+        sources = sorted({doc.metadata.get("source", "desconocido") for doc in docs})
+        context = "\n\n".join(doc.page_content for doc in docs)
+
+        # 3. Generation
+        answer_text = generate_answer(self.chat_llm, query, context, history_text)
+        
+        if _declined_answer(answer_text):
+            self._log_unanswered(query, session_id, sources=sources, reason="declined_with_context")
+
+        # 4. History Update
         chat_sessions.add_user_message(session_id, query)
         chat_sessions.add_ai_message(session_id, answer_text)
-        return answer_text, sources, confidence, session_id
 
-    def _log_unanswered(
-        self,
-        query: str,
-        session_id: str,
-        sources: list[str] | None = None,
-        reason: str = "no_context",
-    ) -> None:
-        """Append an unanswered-query record to the JSONL log (FR5)."""
-        path = self.settings.unanswered_log_path
-        if not path:
-            return
-        ensure_log_dir(path)
-        log_unanswered(path, query, session_id, sources, reason)
+        return answer_text, sources, 1.0, session_id
 
 
 @lru_cache
 def get_rag_engine() -> RagEngine:
-    """Build (and cache) a single RagEngine wired to settings, embeddings, and LLM."""
+    """Build (and cache) a single RagEngine wired to settings, embeddings_llm, and LLM."""
     settings = get_settings()
-    embeddings = build_embeddings(settings)
-    llm = build_llm(settings)
-    return RagEngine(settings, embeddings, llm)
+    embeddings_llm = build_embeddings_llm(settings)
+    chat_llm = build_chat_llm(settings)
+    return RagEngine(settings, embeddings_llm, chat_llm)

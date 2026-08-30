@@ -22,7 +22,7 @@ REFORMULATE_PROMPT = (
 )
 
 
-def build_llm(settings: Settings) -> ChatOllama:
+def build_chat_llm(settings: Settings) -> ChatOllama:
     """Create the Ollama chat model configured from settings."""
     return ChatOllama(
         base_url=settings.ollama_base_url,
@@ -30,7 +30,7 @@ def build_llm(settings: Settings) -> ChatOllama:
         temperature=0.1,
     )
 
-def build_embeddings(settings: Settings) -> OllamaEmbeddings:
+def build_embeddings_llm(settings: Settings) -> OllamaEmbeddings:
     """Create the Ollama embedding model configured from settings."""
     return OllamaEmbeddings(
         base_url=settings.ollama_base_url,
@@ -73,7 +73,7 @@ def reformulate_query(llm, question: str, history: str) -> str:
             "Pregunta reformulada:",
         ),
     ]
-    
+
     try:
         response = llm.invoke(messages)
         standalone_query = response.content.strip()

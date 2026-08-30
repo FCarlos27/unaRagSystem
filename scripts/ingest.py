@@ -4,7 +4,7 @@ import argparse
 
 from app.core.config import get_settings
 from app.services.document_loader import load_documents
-from app.services.llm import build_embeddings
+from app.services.llm import build_embeddings_llm
 from app.services.text_splitter import split_documents
 from app.services.vector_store import build_vector_store
 from app.utils.logging import setup_logging
@@ -33,11 +33,11 @@ def main() -> None:
         if not documents:
             logger.warning("No documents loaded for source %s", source)
             return
-        vector_store = build_vector_store(settings, build_embeddings(settings))
+        vector_store = build_vector_store(settings, build_embeddings_llm(settings))
         vector_store.delete(where={"source": source})
         logger.info("Deleted existing chunks for source %s", source)
     else:
-        vector_store = build_vector_store(settings, build_embeddings(settings))
+        vector_store = build_vector_store(settings, build_embeddings_llm(settings))
 
     chunks = split_documents(
         documents,
