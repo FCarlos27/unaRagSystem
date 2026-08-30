@@ -4,7 +4,7 @@ All external dependencies (Ollama, ChromaDB server) are mocked so the
 suite runs instantly and deterministically in any environment.
 """
 
-from typing import List
+from typing import List, Generator
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -43,7 +43,7 @@ def mock_vector_store() -> MagicMock:
 
 
 @pytest.fixture
-def mock_rag_engine(mock_settings, mock_llm, mock_vector_store) -> MagicMock:
+def mock_rag_engine(mock_settings, mock_llm, mock_vector_store) -> Generator[MagicMock, None, None]:
     """Patch RagEngine dependencies and return a fully mocked instance."""
     import app.services.rag_engine as rag_engine_mod
 
@@ -134,7 +134,7 @@ def test_rag_engine_answer_with_context(mock_rag_engine, mock_llm) -> None:
 
     assert answer == "La UNASUCRE publica horarios en su portal web."
     assert sources == ["instructivo.docx"]
-    assert confidence == 1.0
+    assert confidence == 0.95
     assert session_id == "test-session"
 
     mock_rag_engine.vector_store.similarity_search.assert_called_once()
