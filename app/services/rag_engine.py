@@ -80,7 +80,7 @@ class RagEngine:
         # --- Tier 2: Deterministic (exact metadata lookups with targeted filters) ---
         deterministic_response, sources = evaluate_deterministic_rules(
             query=query,
-            retrieve_fn=lambda q, f: self.retrieve(q, where=f),
+            retrieve_fn=lambda query, filter: self.retrieve(query, where=filter),
         )
         if deterministic_response:
             logger.info("Tier 2 (deterministic) matched for query: %s", query[:50])

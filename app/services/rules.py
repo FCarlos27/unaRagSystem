@@ -59,6 +59,27 @@ LOCATION_PATTERN = re.compile(
     re.IGNORECASE | re.UNICODE,
 )
 
+def _extract_centro_from_query(query: str) -> Optional[str]:
+    """Return the centro local mentioned in the query, if any."""
+    match = CENTRO_REGEX.search(query)
+    return match.group(1).lower() if match else None
+
+
+def _doc_matches_centro(metadata, target_centro: Optional[str], key: str) -> Optional[str]:
+    """Return centro name if present and (optionally) matching the query target."""
+    centro_name = metadata.get(key)
+    if not centro_name:
+        return None
+    if target_centro and target_centro not in centro_name.lower():
+        return None
+    return centro_name
+
+
+def _matches_query_name(query: str, nombre: Optional[str]) -> bool:
+    """True if the doc's name appears in the query (case-insensitive)."""
+    return bool(nombre) and re.search(re.escape(nombre), query, re.IGNORECASE) is not None
+
+
 def match_banks(query: str, docs: List[Document]) -> Tuple[Optional[str], Optional[List[str]]]:
     """Return a formatted banking response and specific source if matched."""
     if not BANK_PATTERN.search(query):
@@ -90,19 +111,14 @@ def match_contacts(query: str, docs: List[Document]) -> Tuple[Optional[str], Opt
         return None, None
 
     # Extract target location from query (e.g., "cumana" -> "sucre", or explicit match)
-    match = CENTRO_REGEX.search(query)
-    target_centro = match.group(1).lower() if match else None
+    target_centro = _extract_centro_from_query(query)
 
     for doc in docs:
         metadata = doc.metadata
-        
-        # Check if document matches the contact directory schema
-        centro_name = metadata.get("centro_local")
-        if not centro_name:
-            continue
 
-        # Filter by requested location if specified in query
-        if target_centro and target_centro not in centro_name.lower():
+        # Check if document matches the contact directory schema
+        centro_name = _doc_matches_centro(metadata, target_centro, "centro_local")
+        if not centro_name:
             continue
 
         # Determine if the query targets Registro vs Coordinación
@@ -126,22 +142,32 @@ def match_contacts(query: str, docs: List[Document]) -> Tuple[Optional[str], Opt
     return None, None
 
 def match_directory_info(query: str, docs: List[Document]) -> Tuple[Optional[str], Optional[List[str]]]:
-    """Return physical address, phone numbers, or codes for a Centro Local directly from metadata."""
+    """Return physical address, phone numbers, or codes for a Centro Local or Unidad
+    de Apoyo directly from metadata."""
     if not LOCATION_PATTERN.search(query):
         return None, None
 
-    match = CENTRO_REGEX.search(query)
-    target_centro = match.group(1).lower() if match else None
+    wants_unidad = re.search(r"unidad de apoyo|apoyo", query, re.IGNORECASE) is not None
 
     for doc in docs:
         metadata = doc.metadata
+        tipo = (metadata.get("tipo") or "CENTRO LOCAL").upper()
         centro_name = metadata.get("nombre") or metadata.get("centro_local")
-        
+
         if not centro_name:
             continue
 
-        # Filter by requested location if specified in query
-        if target_centro and target_centro not in centro_name.lower():
+        # Prefer the entity type the query asks for, but fall back to any type
+        if wants_unidad:
+            if tipo != "UNIDAD DE APOYO":
+                continue
+        elif tipo == "UNIDAD DE APOYO":
+            # A 'centro local' query should not match an unidad de apoyo unless the
+            # name is explicitly asked (e.g. 'donde queda caucagua?').
+            match = _extract_centro_from_query(query)
+            if match and not _matches_query_name(query, centro_name):
+                continue
+        elif not _matches_query_name(query, centro_name):
             continue
 
         # Extract fields matching your JSON schema
@@ -150,18 +176,16 @@ def match_directory_info(query: str, docs: List[Document]) -> Tuple[Optional[str
         codigo = metadata.get("codigo")
         fax = metadata.get("fax")
 
-        lines = [f"**Centro Local {centro_name}** (Código: `{codigo}`)" if codigo else f"**Centro Local {centro_name}**"]
-        
+        label = f"**Unidad de Apoyo {centro_name}**" if tipo == "UNIDAD DE APOYO" else f"**Centro Local {centro_name}**"
+        lines = [f"{label} (Código: `{codigo}`)" if codigo else label]
+
         if direccion:
             lines.append(f"- **Dirección:** {direccion}")
-            
+
         if telefonos:
-            if isinstance(telefonos, list):
-                phone_str = ", ".join(telefonos)
-            else:
-                phone_str = str(telefonos)
+            phone_str = ", ".join(telefonos) if isinstance(telefonos, list) else str(telefonos)
             lines.append(f"- **Teléfonos:** {phone_str}")
-            
+
         if fax:
             lines.append(f"- **Fax:** {fax}")
 
@@ -213,24 +237,5 @@ def evaluate_deterministic_rules(
             response, sources = rule.resolver(query, docs)
             if response:
                 return response, sources
-
-    return None, None
-
-def resolve_deterministic(query: str, docs: List[Document]) -> Tuple[Optional[str], Optional[List[str]]]:
-    """Run all deterministic resolvers. Returns (response_text, source_keys)."""
-    # 1. Bank accounts
-    response, sources = match_banks(query, docs)
-    if response:
-        return response, sources
-
-    # 2. Contact emails (Registro / Coordinación)
-    response, sources = match_contacts(query, docs)
-    if response:
-        return response, sources
-
-    # 3. Physical location, phones, and codes
-    response, sources = match_directory_info(query, docs)
-    if response:
-        return response, sources
 
     return None, None
