@@ -90,7 +90,6 @@ class RagEngine:
 
         # --- Tier 3: Semantic RAG (LLM generation, ~500-1500ms) ---
         search_query = query
-        docs = self.retrieve(search_query)
 
         # Check if reformulation is needed
         if history_text and not should_skip_reformulation(query, history_messages):
@@ -98,7 +97,7 @@ class RagEngine:
             if reformulated != query:
                 search_query = reformulated
                 # Re-retrieve vector docs using the expanded search query
-                docs = self.retrieve(search_query)
+        docs = self.retrieve(search_query)
 
         if not docs:
             logger.info("Tier 3 (semantic): No documents retrieved for query: %s", query[:50])

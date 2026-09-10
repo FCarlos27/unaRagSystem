@@ -1,6 +1,7 @@
 """Fast-path evaluation module: handles conversational heuristics and deterministic data lookups."""
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Tuple
 from langchain_core.documents import Document
@@ -59,6 +60,13 @@ LOCATION_PATTERN = re.compile(
     re.IGNORECASE | re.UNICODE,
 )
 
+def _normalize(text: str) -> str:
+    """Strip diacritics and lowercase (Táchira/táchira -> tachira)."""
+    return "".join(
+        c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c)
+    ).lower()
+
+
 def _extract_centro_from_query(query: str) -> Optional[str]:
     """Return the centro local mentioned in the query, if any."""
     match = CENTRO_REGEX.search(query)
@@ -70,14 +78,16 @@ def _doc_matches_centro(metadata, target_centro: Optional[str], key: str) -> Opt
     centro_name = metadata.get(key)
     if not centro_name:
         return None
-    if target_centro and target_centro not in centro_name.lower():
+    if target_centro and _normalize(target_centro) not in _normalize(centro_name):
         return None
     return centro_name
 
 
 def _matches_query_name(query: str, nombre: Optional[str]) -> bool:
-    """True if the doc's name appears in the query (case-insensitive)."""
-    return bool(nombre) and re.search(re.escape(nombre), query, re.IGNORECASE) is not None
+    """True if the doc's name appears in the query (case & accent insensitive)."""
+    if not nombre:
+        return False
+    return _normalize(nombre) in _normalize(query)
 
 
 def match_banks(query: str, docs: List[Document]) -> Tuple[Optional[str], Optional[List[str]]]:

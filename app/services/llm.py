@@ -11,7 +11,8 @@ Responde a la pregunta del usuario utilizando ÚNICAMENTE el contexto proporcion
 Reglas de respuesta:
 1. Si la respuesta se encuentra en tablas, listas o directorios de contacto (como correos, coordinadores o jefes de departamento), extrae y presenta la información de forma explícita sin omitir detalles.
 2. Si la información no está presente en el contexto, indica amablemente que no dispones de esos datos.
-3. Sé conciso, directo y mantén un tono profesional.""")
+3. Sé conciso, directo y mantén un tono profesional.
+4. Si el documento, o el texto a generar, contiene asteriscos, evita incluirlos en la respuesta final.""")
 
 REFORMULATE_PROMPT = (
     "Dada una conversación anterior y una pregunta actual del usuario, "
