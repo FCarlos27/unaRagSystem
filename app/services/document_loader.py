@@ -129,9 +129,39 @@ def load_json_files(directory: str) -> list[dict]:
 
     return documents
 
+def load_markdown_files(directory: str) -> list[dict]:
+    """Load every .md file in a directory into raw text documents."""
+    documents = []
+    md_dir = Path(directory)
+    if not md_dir.exists():
+        return documents
+
+    for md_path in sorted(md_dir.glob("*.md")):
+        logger.info("Loading %s", md_path.name)
+        try:
+            text = md_path.read_text(encoding="utf-8")
+            if text.strip():
+                documents.append(
+                    {
+                        "page_content": text,
+                        "metadata": {
+                            "source": md_path.name,
+                            "format": "markdown",
+                        },
+                    }
+                )
+        except Exception as exc:
+            logger.error("Failed to parse %s: %s", md_path.name, exc)
+
+    return documents
+
 
 def load_documents(
-    docx_dir: str, json_dir: str | None = None
+    docx_dir: str, md_dir: str | None = None, json_dir: str | None = None
 ) -> list[dict]:
-    """Load all DOCX and JSON documents from the given directories."""
-    return load_docx_files(docx_dir) + load_json_files(json_dir or docx_dir)
+    """Load DOCX, Markdown, and JSON documents from the given directories."""
+    return (
+        load_docx_files(docx_dir)
+        + load_markdown_files(md_dir or docx_dir)
+        + load_json_files(json_dir or docx_dir)
+    )

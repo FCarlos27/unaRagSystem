@@ -24,6 +24,7 @@ class Settings(BaseSettings):
 
     raw_pdfs_dir: str = "data/raw_pdfs"
     raw_docx_dir: str = "data/raw_docx"
+    md_docs_dir: str = "data/md_docs"
     json_docs_dir: str = "data/json_docs"
 
     unanswered_log_path: str = "data/unanswered_queries.jsonl"

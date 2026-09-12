@@ -23,7 +23,7 @@ def main() -> None:
     settings = get_settings()
     source = args.source
 
-    documents = load_documents(settings.raw_docx_dir, settings.json_docs_dir)
+    documents = load_documents(settings.raw_docx_dir, settings.md_docs_dir, settings.json_docs_dir)
     if not documents:
         logger.warning("No documents found in %s / %s", settings.raw_docx_dir, settings.json_docs_dir)
         return
