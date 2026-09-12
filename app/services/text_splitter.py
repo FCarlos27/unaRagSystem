@@ -41,7 +41,7 @@ def _split_markdown(
 
 
 def split_documents(documents: list[dict], chunk_size: int, chunk_overlap: int) -> list[dict]:
-    """Chunk documents; passes prechunked entries through and splits the rest."""
+    """Chunk documents; markdown is header-split, everything else recursive."""
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
@@ -53,16 +53,6 @@ def split_documents(documents: list[dict], chunk_size: int, chunk_overlap: int) 
         # 1. Split markdown documents by headers into section-aware chunks
         if doc["metadata"].get("format") == "markdown":
             chunks.extend(_split_markdown(doc, chunk_size, chunk_overlap))
-            continue
-
-        # 1. Pass pre-chunked documents through as a single chunk
-        if doc["metadata"].get("prechunked"):
-            chunks.append(
-                {
-                    "page_content": doc["page_content"],
-                    "metadata": {**doc["metadata"], "chunk_index": 0},
-                }
-            )
             continue
 
         # 2. Split standard document text

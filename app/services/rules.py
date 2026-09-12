@@ -47,18 +47,40 @@ def should_skip_reformulation(query: str, history_messages: list[BaseMessage]) -
 
 
 # =====================================================================
-# TIER 2: DETERMINISTIC (Exact Entity & JSON Metadata Lookups)
+# TIER 2: DETERMINISTIC (Exact Entity checks — Centro Local Sucre only)
 # =====================================================================
+
+DIRECTORY_SOURCE = "Directorio_centro_local_sucre.md"
+MASTER_SOURCE = "Instructivo_general_inscripcciones_y_servicios.md"
 
 BANK_PATTERN = re.compile(r"\b(banco|bancaria|cuenta|cuentas|arancel|pago|transferencia)\b", re.IGNORECASE)
 CONTACT_PATTERN = re.compile(r"\b(coordinador|jefe|registro|secretaría|correo|contacto)\b", re.IGNORECASE)
-CENTRO_REGEX = re.compile(r"\b(sucre|carabobo|metropolitano|nueva esparta|anzoátegui|táchira|mérida|zulia)\b", re.IGNORECASE)
 LOCATION_PATTERN = re.compile(
     r"\b(?:ubicación|ubicacion|dirección|direccion|donde queda|dónde queda|"
     r"donde esta|dónde esta|dónde está|"
     r"teléfono|telefono|teléfonos|telefonos|fax|código|codigo|queda)\b",
     re.IGNORECASE | re.UNICODE,
 )
+
+# Other national centers (NOT Sucre) that should trigger the redirect notice.
+OTRO_CENTRO_PATTERN = re.compile(
+    r"\b(metropolitano|anzoategui|anzoátegui|apure|aragua|barinas|bolivar|bolívar|"
+    r"carabobo|cojedes|falcon|falcón|guarico|guárico|lara|merida|mérida|monagas|"
+    r"nueva esparta|portuguesa|tachira|táchira|trujillo|yaracuy|zulia|delta amacuro|"
+    r"amazonas|caucagua|valles del tuy|vargas|puerto cabello|punto fijo|el tigre|"
+    r"anaco|guasdualito|tovar|bocono|boconó|carora|mantecal)\b",
+    re.IGNORECASE,
+)
+
+# The only entities we serve, keyed by normalized name.
+SUCRE_ENTITIES = {
+    "sucre": "Centro Local Sucre",
+    "carupano": "Unidad de Apoyo Carúpano",
+    "güiria": "Unidad de Apoyo Güiria",
+    "guiria": "Unidad de Apoyo Güiria",
+    "cariaco": "Unidad de Apoyo Cariaco",
+}
+
 
 def _normalize(text: str) -> str:
     """Strip diacritics and lowercase (Táchira/táchira -> tachira)."""
@@ -67,144 +89,143 @@ def _normalize(text: str) -> str:
     ).lower()
 
 
-def _extract_centro_from_query(query: str) -> Optional[str]:
-    """Return the centro local mentioned in the query, if any."""
-    match = CENTRO_REGEX.search(query)
-    return match.group(1).lower() if match else None
+def _strip_markdown(line: str) -> str:
+    """Remove markdown syntax (*, _, `, >) from a text line."""
+    return re.sub(r"[*_`>]", "", line).strip()
 
 
-def _doc_matches_centro(metadata, target_centro: Optional[str], key: str) -> Optional[str]:
-    """Return centro name if present and (optionally) matching the query target."""
-    centro_name = metadata.get(key)
-    if not centro_name:
+def _query_entity(query: str) -> Optional[str]:
+    """Return the SUCRE_ENTITIES name explicitly asked for, if any."""
+    norm_query = _normalize(query)
+    for alias in ("centro local sucre", "centro local", "sucre"):
+        if alias in norm_query:
+            return "sucre"
+    for name in ("carupano", "güiria", "guiria", "cariaco"):
+        if _normalize(name) in norm_query:
+            return _normalize(name)
+    return None
+
+
+def _doc_entity(doc: Document) -> Optional[Tuple[str, bool]]:
+    """Return (entity title, whether it is an Unidad de Apoyo) from doc headers."""
+    title = doc.metadata.get("h3") or doc.metadata.get("h2")
+    if not title:
         return None
-    if target_centro and _normalize(target_centro) not in _normalize(centro_name):
-        return None
-    return centro_name
+    return title.strip(), "unidad de apoyo" in title.lower()
 
 
-def _matches_query_name(query: str, nombre: Optional[str]) -> bool:
-    """True if the doc's name appears in the query (case & accent insensitive)."""
-    if not nombre:
-        return False
-    return _normalize(nombre) in _normalize(query)
+def _extract_field(text: str, label: str) -> Optional[str]:
+    """Return the value for a labelled field like 'Dirección:', 'Teléfonos:'."""
+    for line in text.splitlines():
+        clean = _strip_markdown(line)
+        match = re.search(rf"^{label}\s*:\s*(.+)$", clean, re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+    return None
+
+
+def match_other_centro(query: str) -> Optional[Tuple[str, List[str]]]:
+    """Redirect requests for centers outside Centro Local Sucre."""
+    if OTRO_CENTRO_PATTERN.search(query):
+        message = (
+            "Este asistente solo dispone de información del Centro Local Sucre "
+            "(Cumaná) y sus Unidades de Apoyo. Para el directorio completo de "
+            "centros locales de la UNA, consulta el sitio oficial: www.unasec.com."
+        )
+        return message, []
+    return None
 
 
 def match_banks(query: str, docs: List[Document]) -> Tuple[Optional[str], Optional[List[str]]]:
-    """Return a formatted banking response and specific source if matched."""
+    """Return the authorized bank accounts read from the master guide text."""
     if not BANK_PATTERN.search(query):
         return None, None
 
-    lines = []
-    sources = set()
-    
+    accounts = []
+    account_pat = re.compile(r"\b(\d{4}-\d{4}-\d{4}-\d{4}-\d{4})\b")
     for doc in docs:
-        if doc.metadata.get("table") != "contactos" and doc.metadata.get("entidad_bancaria"):
-            bank = doc.metadata.get("entidad_bancaria")
-            account_type = doc.metadata.get("tipo_cuenta", "")
-            account_number = doc.metadata.get("numero_cuenta", "")
-            
-            if bank and account_number:
-                label = f"{bank} ({account_type})" if account_type else bank
-                lines.append(f"- {label}: {account_number}")
-                sources.add(doc.metadata.get("source", "unknown"))
+        for line in doc.page_content.splitlines():
+            number_match = account_pat.search(line)
+            if not number_match:
+                continue
+            number = number_match.group(1)
+            bank = _strip_markdown(line.split(number_match.group(0))[0])
+            bank = re.sub(r"^[\s\-•*]+|[:–-]+$", "", bank).strip()
+            if bank and (bank, number) not in accounts:
+                accounts.append((bank, number))
 
-    if not lines:
+    if not accounts:
         return None, None
-        
+
+    lines = [f"- {bank}: `{number}`" for bank, number in accounts]
     response = "Las cuentas bancarias autorizadas para pagar aranceles son:\n" + "\n".join(lines)
-    return response, sorted(list(sources))
+    return response, [MASTER_SOURCE]
+
 
 def match_contacts(query: str, docs: List[Document]) -> Tuple[Optional[str], Optional[List[str]]]:
-    """Return a formatted contact response directly from document metadata."""
+    """Return the Registro or Coordinación email for Centro Local Sucre."""
     if not CONTACT_PATTERN.search(query):
         return None, None
 
-    # Extract target location from query (e.g., "cumana" -> "sucre", or explicit match)
-    target_centro = _extract_centro_from_query(query)
+    is_registro = any(term in query.lower() for term in ["registro", "jefe", "control"])
+    label = "Registro y Control de Estudios" if is_registro else "Coordinación"
 
     for doc in docs:
-        metadata = doc.metadata
-
-        # Check if document matches the contact directory schema
-        centro_name = _doc_matches_centro(metadata, target_centro, "centro_local")
-        if not centro_name:
-            continue
-
-        # Determine if the query targets Registro vs Coordinación
-        is_registro = any(term in query.lower() for term in ["registro", "jefe", "control"])
-        
-        if is_registro:
-            email = metadata.get("email_registro")
-            role_title = "Registro y Control de Estudios"
-        else:
-            email = metadata.get("email_coordinacion")
-            role_title = "Coordinación"
-
-        if email:
-            response = (
-                f"El correo electrónico para la oficina de **{role_title}** "
-                f"del Centro Local {centro_name} es: `{email}`."
-            )
-            source = metadata.get("source", "directorio_contactos.json")
-            return response, [source]
+        for line in doc.page_content.splitlines():
+            clean = _strip_markdown(line).lower()
+            if is_registro and "registro" not in clean:
+                continue
+            if not is_registro and "coordinaci" not in clean:
+                continue
+            email_match = re.search(r"[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}", clean)
+            if email_match:
+                response = (
+                    f"El correo electrónico para la oficina de **{label}** "
+                    f"del Centro Local Sucre es: `{email_match.group(0)}`."
+                )
+                return response, [DIRECTORY_SOURCE]
 
     return None, None
 
+
 def match_directory_info(query: str, docs: List[Document]) -> Tuple[Optional[str], Optional[List[str]]]:
-    """Return physical address, phone numbers, or codes for a Centro Local or Unidad
-    de Apoyo directly from metadata."""
+    """Return physical address, phone numbers, or codes for Sucre entities."""
     if not LOCATION_PATTERN.search(query):
         return None, None
 
     wants_unidad = re.search(r"unidad de apoyo|apoyo", query, re.IGNORECASE) is not None
+    target = _query_entity(query)
 
     for doc in docs:
-        metadata = doc.metadata
-        tipo = (metadata.get("tipo") or "CENTRO LOCAL").upper()
-        centro_name = metadata.get("nombre") or metadata.get("centro_local")
+        entity = _doc_entity(doc)
+        if not entity:
+            continue
+        title, is_unidad = entity
 
-        if not centro_name:
+        if wants_unidad and not is_unidad:
+            continue
+        if not wants_unidad and is_unidad and target not in ("carupano", "güiria", "guiria", "cariaco"):
             continue
 
-        # Prefer the entity type the query asks for, but fall back to any type
-        if wants_unidad:
-            if tipo != "UNIDAD DE APOYO":
-                continue
-        elif tipo == "UNIDAD DE APOYO":
-            # A 'centro local' query should not match an unidad de apoyo unless the
-            # name is explicitly asked (e.g. 'donde queda caucagua?').
-            match = _extract_centro_from_query(query)
-            if match and not _matches_query_name(query, centro_name):
-                continue
-        elif not _matches_query_name(query, centro_name):
-            continue
+        direccion = _extract_field(doc.page_content, "Dirección")
+        telefonos = _extract_field(doc.page_content, "Teléfonos")
+        codigo = _extract_field(doc.page_content, "Código")
+        fax = _extract_field(doc.page_content, "Fax")
 
-        # Extract fields matching your JSON schema
-        direccion = metadata.get("direccion")
-        telefonos = metadata.get("telefonos")
-        codigo = metadata.get("codigo")
-        fax = metadata.get("fax")
-
-        label = f"**Unidad de Apoyo {centro_name}**" if tipo == "UNIDAD DE APOYO" else f"**Centro Local {centro_name}**"
-        lines = [f"{label} (Código: `{codigo}`)" if codigo else label]
-
+        lines = [f"**{title}**" + (f" (Código: `{codigo}`)" if codigo else "")]
         if direccion:
             lines.append(f"- **Dirección:** {direccion}")
-
         if telefonos:
-            phone_str = ", ".join(telefonos) if isinstance(telefonos, list) else str(telefonos)
-            lines.append(f"- **Teléfonos:** {phone_str}")
-
+            lines.append(f"- **Teléfonos:** {telefonos}")
         if fax:
             lines.append(f"- **Fax:** {fax}")
 
         if len(lines) > 1:
-            source = metadata.get("source", "directorio_oficial.json")
             response = "Información de contacto oficial:\n" + "\n".join(lines)
-            return response, [source]
+            return response, [DIRECTORY_SOURCE]
 
     return None, None
+
 
 @dataclass
 class DeterministicRule:
@@ -217,17 +238,17 @@ class DeterministicRule:
 DETERMINISTIC_RULES = [
     DeterministicRule(
         pattern=LOCATION_PATTERN,
-        db_filter={"source": "Directorio_centros_locales.json"},
+        db_filter={"source": DIRECTORY_SOURCE},
         resolver=match_directory_info
     ),
     DeterministicRule(
         pattern=BANK_PATTERN,
-        db_filter={"source": "Bancos_autorizados.json"},
+        db_filter={"source": MASTER_SOURCE},
         resolver=match_banks
     ),
     DeterministicRule(
         pattern=CONTACT_PATTERN,
-        db_filter={"source": "directorio_registro_y_coordinacion.json"},
+        db_filter={"source": DIRECTORY_SOURCE},
         resolver=match_contacts
     ),
 ]
@@ -239,6 +260,11 @@ def evaluate_deterministic_rules(
     Evaluates rules and selectively queries the DB only when a pattern matches.
     Delegates the actual DB call back to the engine via retrieve_fn.
     """
+    # Redirect anything that names a center outside Sucre without touching the DB.
+    other_centro = match_other_centro(query)
+    if other_centro:
+        return other_centro
+
     for rule in DETERMINISTIC_RULES:
         if rule.pattern.search(query):
             # Only fetch documents from the exact source file required by this rule

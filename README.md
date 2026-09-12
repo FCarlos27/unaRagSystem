@@ -67,7 +67,7 @@ All tiers update session history consistently for multi-turn conversations.
 │   └── utils/            # Logging
 ├── data/
 │   ├── raw_docx/         # Source .docx instructions for ingestion
-│   ├── json_docs/        # Structured JSON data (banks, directories, contacts)
+│   ├── md_docs/          # Markdown knowledge base (processes + Sucre directory)
 │   └── chroma_db/        # Persistent ChromaDB storage
 ├── scripts/              # Ingestion script
 ├── tests/
@@ -82,7 +82,7 @@ All tiers update session history consistently for multi-turn conversations.
 1. Ensure Ollama is running locally and the models are available:
    `ollama pull nomic-embed-text` and `ollama pull llama3.2:3b`
 2. `cp .env.example .env`.
-3. Drop official `.docx` instructions into `data/raw_docx/` and JSON files into `data/json_docs/`.
+3. Drop official `.docx` instructions into `data/raw_docx/` and Markdown files into `data/md_docs/`.
 4. Ingest documents: `python scripts/ingest.py`.
 5. Run the API: `uvicorn app.main:app --reload` or `docker compose up --build`.
 

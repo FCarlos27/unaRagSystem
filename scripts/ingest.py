@@ -3,7 +3,7 @@
 import argparse
 
 from app.core.config import get_settings
-from app.services.document_loader import load_documents
+from app.services.document_loader import load_documents, load_markdown_files
 from app.services.llm import build_embeddings_llm
 from app.services.text_splitter import split_documents
 from app.services.vector_store import build_vector_store
@@ -18,14 +18,22 @@ def main() -> None:
         "--source",
         help="Re-index only this source file (deletes its existing chunks first).",
     )
+    parser.add_argument(
+        "--skip-docx",
+        action="store_true",
+        help="Only ingest markdown files, skipping .docx documents.",
+    )
     args = parser.parse_args()
 
     settings = get_settings()
     source = args.source
 
-    documents = load_documents(settings.raw_docx_dir, settings.md_docs_dir, settings.json_docs_dir)
+    if args.skip_docx:
+        documents = load_markdown_files(settings.md_docs_dir)
+    else:
+        documents = load_documents(settings.raw_docx_dir, settings.md_docs_dir)
     if not documents:
-        logger.warning("No documents found in %s / %s", settings.raw_docx_dir, settings.json_docs_dir)
+        logger.warning("No documents found in %s / %s", settings.raw_docx_dir, settings.md_docs_dir)
         return
 
     if source:

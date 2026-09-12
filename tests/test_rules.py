@@ -1,4 +1,7 @@
-"""Unit tests for the Waterfall Router fast-path rules (Heuristics & Deterministic)."""
+"""Unit tests for the Waterfall Router fast-path rules (Heuristics & Deterministic).
+
+Scoped to Centro Local Sucre: directory chunks are plain markdown text, not JSON.
+"""
 
 import pytest
 from langchain_core.documents import Document
@@ -6,6 +9,8 @@ from langchain_core.messages import HumanMessage, AIMessage
 
 from app.services.rules import (
     DETERMINISTIC_RULES,
+    DIRECTORY_SOURCE,
+    MASTER_SOURCE,
     evaluate_deterministic_rules,
     match_heuristic,
     should_skip_reformulation,
@@ -19,64 +24,41 @@ from app.services.rules import (
 def bank_docs():
     return [
         Document(
-            page_content="Datos del banco Banesco",
-            metadata={
-                "entidad_bancaria": "Banesco",
-                "numero_cuenta": "0134-1234-5678",
-                "tipo_cuenta": "Corriente",
-                "source": "Bancos_autorizados.json",
-            }
+            page_content="""## 2. Pagos, Bancos y Ajustes Financieros
+- **Banco de Venezuela:** 0102-0104-7300-0032-3062
+- **Banesco:** 0134-0380-5638-0100-5054""",
+            metadata={"source": MASTER_SOURCE},
         ),
-        Document(
-            page_content="Datos del banco Venezuela",
-            metadata={
-                "entidad_bancaria": "Banco de Venezuela",
-                "numero_cuenta": "0102-9876-5432",
-                "tipo_cuenta": "",  # Testing missing account type
-                "source": "Bancos_autorizados.json",
-            }
-        )
     ]
 
 @pytest.fixture
 def contact_docs():
     return [
         Document(
-            page_content="Directorio Sucre",
-            metadata={
-                "table": "contactos",
-                "centro_local": "Sucre",
-                "email_coordinacion": "coord.sucre@gmail.com",
-                "email_registro": "registro.sucre@gmail.com",
-                "source": "directorio_registro_y_coordinacion.json",
-            }
+            page_content="""Registro y Control de Estudios: profsergiosalazar20@gmail.com
+Coordinación: angelamaiz@gmail.com""",
+            metadata={"h2": "Centro Local Sucre", "source": DIRECTORY_SOURCE},
         ),
-        Document(
-            page_content="Directorio Metropolitano",
-            metadata={
-                "table": "contactos",
-                "centro_local": "Metropolitano",
-                "email_coordinacion": "coord.metro@gmail.com",
-                "email_registro": "registro.metro@gmail.com",
-                "source": "directorio_registro_y_coordinacion.json",
-            }
-        )
     ]
 
 @pytest.fixture
 def centro_docs():
     return [
         Document(
-            page_content="Centro Local Sucre",
-            metadata={
-                "nombre": "Sucre",
-                "direccion": "Calle Sucre, Parroquia Santa Inés",
-                "telefonos": "(0293) 4333358",
-                "codigo": "1700",
-                "fax": "(0293) 4312677",
-                "source": "Directorio_centros_locales.json",
-            }
-        )
+            page_content="""## Centro Local Sucre
+Dirección: Calle Sucre, Parroquia Santa Inés, Cumaná
+Teléfonos: (0293) 4333358, (0293) 4314890
+Código: 1700
+Fax: (0293) 4312677""",
+            metadata={"h2": "Centro Local Sucre", "source": DIRECTORY_SOURCE},
+        ),
+        Document(
+            page_content="""## Unidad de Apoyo Carúpano
+Dirección: Av. Independencia, Edif. Tawil, Carúpano
+Código: 1701
+Fax: (0294) 3310855""",
+            metadata={"h2": "Unidad de Apoyo Carúpano", "source": DIRECTORY_SOURCE},
+        ),
     ]
 
 # =====================================================================
@@ -125,16 +107,16 @@ def _fake_retrieve(docs_by_filter):
 
 
 def test_registry_maps_patterns_to_source_filters():
-    """Each rule binds the expected pattern to the correct source filter."""
-    assert DETERMINISTIC_RULES[0].db_filter == {"source": "Directorio_centros_locales.json"}
-    assert DETERMINISTIC_RULES[1].db_filter == {"source": "Bancos_autorizados.json"}
-    assert DETERMINISTIC_RULES[2].db_filter == {"source": "directorio_registro_y_coordinacion.json"}
+    """Each rule binds the expected pattern to the correct source file."""
+    assert DETERMINISTIC_RULES[0].db_filter == {"source": DIRECTORY_SOURCE}
+    assert DETERMINISTIC_RULES[1].db_filter == {"source": MASTER_SOURCE}
+    assert DETERMINISTIC_RULES[2].db_filter == {"source": DIRECTORY_SOURCE}
 
 
 def test_evaluate_banks(bank_docs):
-    """Bank query retrieves the bancos source and formats the accounts."""
+    """Bank query retrieves the master guide source and formats the accounts."""
     docs_by_filter = {
-        (("source", "Bancos_autorizados.json"),): bank_docs,
+        (("source", MASTER_SOURCE),): bank_docs,
     }
     retrieve_fn = _fake_retrieve(docs_by_filter)
 
@@ -143,32 +125,32 @@ def test_evaluate_banks(bank_docs):
     )
 
     assert response is not None
-    assert "Banesco (Corriente): 0134-1234-5678" in response
-    assert "Banco de Venezuela: 0102-9876-5432" in response
-    assert sources == ["Bancos_autorizados.json"]
+    assert "Banco de Venezuela: `0102-0104-7300-0032-3062`" in response
+    assert "Banesco: `0134-0380-5638-0100-5054`" in response
+    assert sources == [MASTER_SOURCE]
 
 
 def test_evaluate_contacts_coordinador(contact_docs):
-    """Contact query maps to the coordinator email for the specific location."""
+    """Contact query maps to the coordinator email for Centro Local Sucre."""
     docs_by_filter = {
-        (("source", "directorio_registro_y_coordinacion.json"),): contact_docs,
+        (("source", DIRECTORY_SOURCE),): contact_docs,
     }
     retrieve_fn = _fake_retrieve(docs_by_filter)
 
     response, sources = evaluate_deterministic_rules(
-        "¿Cuál es el correo del coordinador metropolitano?", retrieve_fn
+        "¿Cuál es el correo del coordinador?", retrieve_fn
     )
 
     assert response is not None
-    assert "coord.metro@gmail.com" in response
+    assert "angelamaiz@gmail.com" in response
     assert "Registro y Control" not in response
-    assert sources == ["directorio_registro_y_coordinacion.json"]
+    assert sources == [DIRECTORY_SOURCE]
 
 
 def test_evaluate_contacts_registro(contact_docs):
     """'jefe'/'registro' keywords pull the registro email for the right center."""
     docs_by_filter = {
-        (("source", "directorio_registro_y_coordinacion.json"),): contact_docs,
+        (("source", DIRECTORY_SOURCE),): contact_docs,
     }
     retrieve_fn = _fake_retrieve(docs_by_filter)
 
@@ -177,31 +159,15 @@ def test_evaluate_contacts_registro(contact_docs):
     )
 
     assert response is not None
-    assert "registro.sucre@gmail.com" in response
+    assert "profsergiosalazar20@gmail.com" in response
     assert "Registro y Control de Estudios" in response
-    assert sources == ["directorio_registro_y_coordinacion.json"]
-
-
-def test_evaluate_contacts_no_location(contact_docs):
-    """Without a location in the query, the first matching contact is returned."""
-    docs_by_filter = {
-        (("source", "directorio_registro_y_coordinacion.json"),): contact_docs,
-    }
-    retrieve_fn = _fake_retrieve(docs_by_filter)
-
-    response, sources = evaluate_deterministic_rules(
-        "¿Cuál es el correo de control de estudios?", retrieve_fn
-    )
-
-    assert response is not None
-    # Assuming the loop finds Sucre first in the list
-    assert "registro.sucre@gmail.com" in response
+    assert sources == [DIRECTORY_SOURCE]
 
 
 def test_evaluate_directory_info(centro_docs):
-    """Location query retrieves the centros locales source and returns the address."""
+    """Location query returns the Centro Local Sucre address."""
     docs_by_filter = {
-        (("source", "Directorio_centros_locales.json"),): centro_docs,
+        (("source", DIRECTORY_SOURCE),): centro_docs,
     }
     retrieve_fn = _fake_retrieve(docs_by_filter)
 
@@ -212,7 +178,51 @@ def test_evaluate_directory_info(centro_docs):
     assert response is not None
     assert "Calle Sucre" in response
     assert "Código: `1700`" in response
-    assert sources == ["Directorio_centros_locales.json"]
+    assert sources == [DIRECTORY_SOURCE]
+
+
+def test_evaluate_directory_info_unidad(centro_docs):
+    """A query mentioning 'unidad de apoyo' resolves to Carúpano, not the CL."""
+    docs_by_filter = {
+        (("source", DIRECTORY_SOURCE),): centro_docs,
+    }
+    retrieve_fn = _fake_retrieve(docs_by_filter)
+
+    response, sources = evaluate_deterministic_rules(
+        "Donde queda la unidad de apoyo carupano?", retrieve_fn
+    )
+
+    assert response is not None
+    assert "Unidad de Apoyo Carúpano" in response
+    assert "Código: `1701`" in response
+    assert sources == [DIRECTORY_SOURCE]
+
+
+def test_evaluate_other_centro_redirects():
+    """Asking about another center returns the Sucre-only notice without retrieval."""
+    calls = []
+
+    def retrieve_fn(query, db_filter):
+        calls.append(db_filter)
+        return []
+
+    response, sources = evaluate_deterministic_rules(
+        "Donde queda el centro local carabobo?", retrieve_fn
+    )
+
+    assert response is not None
+    assert "www.unasec.com" in response
+    assert sources == []
+    assert calls == []
+
+
+def test_partial_centro_names_still_redirect():
+    """Accent-insensitive redirect for another center's name."""
+    response, _ = evaluate_deterministic_rules(
+        "Cuál es la dirección del centro de tachira?", lambda q, f: []
+    )
+    assert response is not None
+    assert "www.unasec.com" in response
 
 
 def test_evaluate_no_match_skips_retrieval():
