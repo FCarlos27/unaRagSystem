@@ -53,22 +53,42 @@ def should_skip_reformulation(query: str, history_messages: list[BaseMessage]) -
 DIRECTORY_SOURCE = "Directorio_centro_local_sucre.md"
 MASTER_SOURCE = "Instructivo_general_inscripcciones_y_servicios.md"
 
-BANK_PATTERN = re.compile(r"\b(banco|bancaria|cuenta|cuentas|arancel|pago|transferencia)\b", re.IGNORECASE)
-CONTACT_PATTERN = re.compile(r"\b(coordinador|jefe|registro|secretaría|correo|contacto)\b", re.IGNORECASE)
-LOCATION_PATTERN = re.compile(
-    r"\b(?:ubicación|ubicacion|dirección|direccion|donde queda|dónde queda|"
-    r"donde esta|dónde esta|dónde está|"
-    r"teléfono|telefono|teléfonos|telefonos|fax|código|codigo|queda)\b",
-    re.IGNORECASE | re.UNICODE,
+def _normalize(text: str) -> str:
+    """Strip diacritics and lowercase (Táchira/táchira -> tachira)."""
+    return "".join(
+        c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c)
+    ).lower()
+
+
+def _strip_markdown(line: str) -> str:
+    """Remove markdown syntax (*, _, `, >) and leading list bullets from a text line."""
+    line = re.sub(r"[*_`>]", "", line)
+    return re.sub(r"^[\s\-•]+", "", line).strip()
+
+
+BANK_PATTERN = re.compile(
+    _normalize(r"\b(banco|bancaria|cuenta|cuentas|arancel|pago|transferencia)\b"),
+    re.IGNORECASE,
+)
+DIRECTORY_PATTERN = re.compile(
+    _normalize(
+        r"\b(coordinador|jefe|registro|secretaría|correo|contacto|"
+        r"ubicación|dirección|dónde queda|dónde está|"
+        r"teléfono|teléfonos|fax|código|queda)\b"
+    ),
+    re.IGNORECASE,
 )
 
 # Other national centers (NOT Sucre) that should trigger the redirect notice.
 OTRO_CENTRO_PATTERN = re.compile(
-    r"\b(metropolitano|anzoategui|anzoátegui|apure|aragua|barinas|bolivar|bolívar|"
-    r"carabobo|cojedes|falcon|falcón|guarico|guárico|lara|merida|mérida|monagas|"
-    r"nueva esparta|portuguesa|tachira|táchira|trujillo|yaracuy|zulia|delta amacuro|"
-    r"amazonas|caucagua|valles del tuy|vargas|puerto cabello|punto fijo|el tigre|"
-    r"anaco|guasdualito|tovar|bocono|boconó|carora|mantecal)\b",
+    _normalize(
+        r"\b(metropolitano|anzoátegui|apure|aragua|barinas|bolívar|"
+        r"carabobo|cojedes|falcón|guárico|lara|mérida|monagas|"
+        r"nueva esparta|portuguesa|táchira|trujillo|yaracuy|zulia|"
+        r"delta amacuro|amazonas|caucagua|valles del tuy|vargas|"
+        r"puerto cabello|punto fijo|el tigre|anaco|guasdualito|"
+        r"tovar|boconó|carora|mantecal)\b"
+    ),
     re.IGNORECASE,
 )
 
@@ -82,27 +102,20 @@ SUCRE_ENTITIES = {
 }
 
 
-def _normalize(text: str) -> str:
-    """Strip diacritics and lowercase (Táchira/táchira -> tachira)."""
-    return "".join(
-        c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c)
-    ).lower()
-
-
-def _strip_markdown(line: str) -> str:
-    """Remove markdown syntax (*, _, `, >) from a text line."""
-    return re.sub(r"[*_`>]", "", line).strip()
-
-
 def _query_entity(query: str) -> Optional[str]:
     """Return the SUCRE_ENTITIES name explicitly asked for, if any."""
     norm_query = _normalize(query)
-    for alias in ("centro local sucre", "centro local", "sucre"):
-        if alias in norm_query:
-            return "sucre"
+    
+    # 1. Highest Priority: Specific Unidades de Apoyo
     for name in ("carupano", "güiria", "guiria", "cariaco"):
         if _normalize(name) in norm_query:
             return _normalize(name)
+            
+    # 2. Fallback Priority: Main Center (Cumaná)
+    for alias in ("centro local sucre", "centro local", "sucre"):
+        if alias in norm_query:
+            return "sucre"
+            
     return None
 
 
@@ -114,19 +127,9 @@ def _doc_entity(doc: Document) -> Optional[Tuple[str, bool]]:
     return title.strip(), "unidad de apoyo" in title.lower()
 
 
-def _extract_field(text: str, label: str) -> Optional[str]:
-    """Return the value for a labelled field like 'Dirección:', 'Teléfonos:'."""
-    for line in text.splitlines():
-        clean = _strip_markdown(line)
-        match = re.search(rf"^{label}\s*:\s*(.+)$", clean, re.IGNORECASE)
-        if match:
-            return match.group(1).strip()
-    return None
-
-
 def match_other_centro(query: str) -> Optional[Tuple[str, List[str]]]:
     """Redirect requests for centers outside Centro Local Sucre."""
-    if OTRO_CENTRO_PATTERN.search(query):
+    if OTRO_CENTRO_PATTERN.search(_normalize(query)):
         message = (
             "Este asistente solo dispone de información del Centro Local Sucre "
             "(Cumaná) y sus Unidades de Apoyo. Para el directorio completo de "
@@ -136,93 +139,57 @@ def match_other_centro(query: str) -> Optional[Tuple[str, List[str]]]:
     return None
 
 
-def match_banks(query: str, docs: List[Document]) -> Tuple[Optional[str], Optional[List[str]]]:
-    """Return the authorized bank accounts read from the master guide text."""
-    if not BANK_PATTERN.search(query):
+def match_banks(norm_query: str, docs: List[Document]) -> Tuple[Optional[str], Optional[List[str]]]:
+    """Return all authorized bank accounts and payment guidelines."""
+    if not BANK_PATTERN.search(norm_query):
         return None, None
-
-    accounts = []
-    account_pat = re.compile(r"\b(\d{4}-\d{4}-\d{4}-\d{4}-\d{4})\b")
-    for doc in docs:
-        for line in doc.page_content.splitlines():
-            number_match = account_pat.search(line)
-            if not number_match:
-                continue
-            number = number_match.group(1)
-            bank = _strip_markdown(line.split(number_match.group(0))[0])
-            bank = re.sub(r"^[\s\-•*]+|[:–-]+$", "", bank).strip()
-            if bank and (bank, number) not in accounts:
-                accounts.append((bank, number))
-
-    if not accounts:
-        return None, None
-
-    lines = [f"- {bank}: `{number}`" for bank, number in accounts]
-    response = "Las cuentas bancarias autorizadas para pagar aranceles son:\n" + "\n".join(lines)
-    return response, [MASTER_SOURCE]
-
-
-def match_contacts(query: str, docs: List[Document]) -> Tuple[Optional[str], Optional[List[str]]]:
-    """Return the Registro or Coordinación email for Centro Local Sucre."""
-    if not CONTACT_PATTERN.search(query):
-        return None, None
-
-    is_registro = any(term in query.lower() for term in ["registro", "jefe", "control"])
-    label = "Registro y Control de Estudios" if is_registro else "Coordinación"
 
     for doc in docs:
-        for line in doc.page_content.splitlines():
-            clean = _strip_markdown(line).lower()
-            if is_registro and "registro" not in clean:
-                continue
-            if not is_registro and "coordinaci" not in clean:
-                continue
-            email_match = re.search(r"[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}", clean)
-            if email_match:
-                response = (
-                    f"El correo electrónico para la oficina de **{label}** "
-                    f"del Centro Local Sucre es: `{email_match.group(0)}`."
-                )
-                return response, [DIRECTORY_SOURCE]
+        # Select the exact "Pagos, Bancos..." section, not any chunk mentioning "banco"
+        if doc.metadata.get("h2") == "2. Pagos, Bancos y Ajustes Financieros":
+            lines = ["Cuentas Bancarias Autorizadas y Pagos (UNA):"]
+            for line in doc.page_content.splitlines():
+                clean_line = _strip_markdown(line)
+                if not clean_line or clean_line.startswith("#"):
+                    continue
+                lines.append(f"- {clean_line}")
+
+            return "\n".join(lines), [MASTER_SOURCE]
 
     return None, None
 
 
-def match_directory_info(query: str, docs: List[Document]) -> Tuple[Optional[str], Optional[List[str]]]:
-    """Return physical address, phone numbers, or codes for Sucre entities."""
-    if not LOCATION_PATTERN.search(query):
+def match_directory(norm_query: str, docs: List[Document]) -> Tuple[Optional[str], Optional[List[str]]]:
+    """Returns all location, telephone, and email details for the requested Sucre entity."""
+    if not DIRECTORY_PATTERN.search(norm_query):
         return None, None
 
-    wants_unidad = re.search(r"unidad de apoyo|apoyo", query, re.IGNORECASE) is not None
-    target = _query_entity(query)
+    target = _query_entity(norm_query) or "sucre"
+    unidades = ("carupano", "güiria", "guiria", "cariaco")
 
     for doc in docs:
         entity = _doc_entity(doc)
         if not entity:
             continue
         title, is_unidad = entity
+        norm_title = _normalize(title)
 
-        if wants_unidad and not is_unidad:
+        # Match entity target to document header
+        if target in unidades and _normalize(target) not in norm_title:
             continue
-        if not wants_unidad and is_unidad and target not in ("carupano", "güiria", "guiria", "cariaco"):
+        if target == "sucre" and (is_unidad or "sucre" not in norm_title):
             continue
 
-        direccion = _extract_field(doc.page_content, "Dirección")
-        telefonos = _extract_field(doc.page_content, "Teléfonos")
-        codigo = _extract_field(doc.page_content, "Código")
-        fax = _extract_field(doc.page_content, "Fax")
-
-        lines = [f"**{title}**" + (f" (Código: `{codigo}`)" if codigo else "")]
-        if direccion:
-            lines.append(f"- **Dirección:** {direccion}")
-        if telefonos:
-            lines.append(f"- **Teléfonos:** {telefonos}")
-        if fax:
-            lines.append(f"- **Fax:** {fax}")
+        # Extract all content lines from the matched entity chunk
+        lines = [f"Información oficial de {title}:"]
+        for line in doc.page_content.splitlines():
+            clean_line = _strip_markdown(line)
+            if clean_line.startswith("#") or not clean_line:
+                continue
+            lines.append(f"- {clean_line}")
 
         if len(lines) > 1:
-            response = "Información de contacto oficial:\n" + "\n".join(lines)
-            return response, [DIRECTORY_SOURCE]
+            return "\n".join(lines), [DIRECTORY_SOURCE]
 
     return None, None
 
@@ -237,19 +204,14 @@ class DeterministicRule:
 # The Registry: Order matters (evaluated top to bottom)
 DETERMINISTIC_RULES = [
     DeterministicRule(
-        pattern=LOCATION_PATTERN,
-        db_filter={"source": DIRECTORY_SOURCE},
-        resolver=match_directory_info
-    ),
-    DeterministicRule(
         pattern=BANK_PATTERN,
         db_filter={"source": MASTER_SOURCE},
         resolver=match_banks
     ),
     DeterministicRule(
-        pattern=CONTACT_PATTERN,
+        pattern=DIRECTORY_PATTERN,
         db_filter={"source": DIRECTORY_SOURCE},
-        resolver=match_contacts
+        resolver=match_directory
     ),
 ]
 
@@ -265,12 +227,13 @@ def evaluate_deterministic_rules(
     if other_centro:
         return other_centro
 
+    norm_query = _normalize(query)
     for rule in DETERMINISTIC_RULES:
-        if rule.pattern.search(query):
+        if rule.pattern.search(norm_query):
             # Only fetch documents from the exact source file required by this rule
             docs = retrieve_fn(query, rule.db_filter)
 
-            response, sources = rule.resolver(query, docs)
+            response, sources = rule.resolver(norm_query, docs)
             if response:
                 return response, sources
 

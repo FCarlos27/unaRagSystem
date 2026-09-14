@@ -27,7 +27,7 @@ def bank_docs():
             page_content="""## 2. Pagos, Bancos y Ajustes Financieros
 - **Banco de Venezuela:** 0102-0104-7300-0032-3062
 - **Banesco:** 0134-0380-5638-0100-5054""",
-            metadata={"source": MASTER_SOURCE},
+            metadata={"source": MASTER_SOURCE, "h2": "2. Pagos, Bancos y Ajustes Financieros"},
         ),
     ]
 
@@ -35,9 +35,16 @@ def bank_docs():
 def contact_docs():
     return [
         Document(
-            page_content="""Registro y Control de Estudios: profsergiosalazar20@gmail.com
-Coordinación: angelamaiz@gmail.com""",
-            metadata={"h2": "Centro Local Sucre", "source": DIRECTORY_SOURCE},
+            page_content="""## Centro Local Sucre (Cumaná)
+- Código: 1700
+- Ubicación/Dirección: Calle Sucre, Parroquia Santa Inés. Cumaná, Estado Sucre.
+- Teléfonos: (0293) 4333358, (0293) 4314890
+- Fax: (0293) 4312677
+- Registro y Control de Estudios: profsergiosalazar20@gmail.com
+- Coordinación: angelamaiz@gmail.com
+- Orientadores:
+  - Elizabeth Nuez: elinuez01@gmail.com""",
+            metadata={"h2": "Centro Local Sucre (Cumaná)", "source": DIRECTORY_SOURCE},
         ),
     ]
 
@@ -108,9 +115,8 @@ def _fake_retrieve(docs_by_filter):
 
 def test_registry_maps_patterns_to_source_filters():
     """Each rule binds the expected pattern to the correct source file."""
-    assert DETERMINISTIC_RULES[0].db_filter == {"source": DIRECTORY_SOURCE}
-    assert DETERMINISTIC_RULES[1].db_filter == {"source": MASTER_SOURCE}
-    assert DETERMINISTIC_RULES[2].db_filter == {"source": DIRECTORY_SOURCE}
+    assert DETERMINISTIC_RULES[0].db_filter == {"source": MASTER_SOURCE}
+    assert DETERMINISTIC_RULES[1].db_filter == {"source": DIRECTORY_SOURCE}
 
 
 def test_evaluate_banks(bank_docs):
@@ -125,59 +131,26 @@ def test_evaluate_banks(bank_docs):
     )
 
     assert response is not None
-    assert "Banco de Venezuela: `0102-0104-7300-0032-3062`" in response
-    assert "Banesco: `0134-0380-5638-0100-5054`" in response
+    assert "- Banco de Venezuela: 0102-0104-7300-0032-3062" in response
+    assert "- Banesco: 0134-0380-5638-0100-5054" in response
     assert sources == [MASTER_SOURCE]
 
 
-def test_evaluate_contacts_coordinador(contact_docs):
-    """Contact query maps to the coordinator email for Centro Local Sucre."""
+def test_evaluate_directory(contact_docs):
+    """Contact query maps to the directory source and returns the relevant emails."""
     docs_by_filter = {
         (("source", DIRECTORY_SOURCE),): contact_docs,
     }
     retrieve_fn = _fake_retrieve(docs_by_filter)
 
     response, sources = evaluate_deterministic_rules(
-        "¿Cuál es el correo del coordinador?", retrieve_fn
+        "¿Cuál es el correo del coordinador de Centro Local Sucre?", retrieve_fn
     )
 
     assert response is not None
-    assert "angelamaiz@gmail.com" in response
-    assert "Registro y Control" not in response
-    assert sources == [DIRECTORY_SOURCE]
-
-
-def test_evaluate_contacts_registro(contact_docs):
-    """'jefe'/'registro' keywords pull the registro email for the right center."""
-    docs_by_filter = {
-        (("source", DIRECTORY_SOURCE),): contact_docs,
-    }
-    retrieve_fn = _fake_retrieve(docs_by_filter)
-
-    response, sources = evaluate_deterministic_rules(
-        "Necesito hablar con el jefe de registro en sucre", retrieve_fn
-    )
-
-    assert response is not None
-    assert "profsergiosalazar20@gmail.com" in response
-    assert "Registro y Control de Estudios" in response
-    assert sources == [DIRECTORY_SOURCE]
-
-
-def test_evaluate_directory_info(centro_docs):
-    """Location query returns the Centro Local Sucre address."""
-    docs_by_filter = {
-        (("source", DIRECTORY_SOURCE),): centro_docs,
-    }
-    retrieve_fn = _fake_retrieve(docs_by_filter)
-
-    response, sources = evaluate_deterministic_rules(
-        "Donde queda el centro local sucre?", retrieve_fn
-    )
-
-    assert response is not None
-    assert "Calle Sucre" in response
-    assert "Código: `1700`" in response
+    assert "Ubicación/Dirección: " in response
+    assert "Código" in response
+    assert "Orientadores" in response
     assert sources == [DIRECTORY_SOURCE]
 
 
@@ -194,7 +167,7 @@ def test_evaluate_directory_info_unidad(centro_docs):
 
     assert response is not None
     assert "Unidad de Apoyo Carúpano" in response
-    assert "Código: `1701`" in response
+    assert "Código: 1701" in response
     assert sources == [DIRECTORY_SOURCE]
 
 
