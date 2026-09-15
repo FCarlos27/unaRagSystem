@@ -94,3 +94,11 @@ All tiers update session history consistently for multi-turn conversations.
 - `GET /health`
 
 Conversation history is stored in memory (resets on restart).
+
+## Examples
+
+Screenshots of the chat widget making queries against the `/api/v1/query` endpoint:
+
+![Chat example 1](app/images/example1.png)
+
+![Chat example 2](app/images/example2.png)
