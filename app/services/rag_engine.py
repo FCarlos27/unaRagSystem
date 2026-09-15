@@ -16,6 +16,7 @@ from app.services.llm import (
     build_chat_llm,
     build_embeddings_llm,
 )
+from app.services.ollama_health import ollama_running
 from app.services.rules import (
     evaluate_deterministic_rules,
     match_heuristic,
@@ -60,6 +61,17 @@ class RagEngine:
         top_k = top_k or self.settings.retrieval_top_k
         return self.vector_store.similarity_search(query, k=top_k, filter=where)
 
+    def _ollama_unavailable(self, query: str, session_id: str) -> tuple[str, List[str], float, str]:
+        """Return a friendly fallback when Ollama is unreachable mid-conversation."""
+        message = (
+            "Disculpa las molestias. El servicio de inteligencia artificial no está "
+            "disponible en este momento porque el servidor de Ollama está caído. "
+            "Por favor intenta de nuevo en unos minutos."
+        )
+        chat_sessions.add_user_message(session_id, query)
+        chat_sessions.add_ai_message(session_id, message)
+        return message, [], 0.0, session_id
+
     def answer(
         self, query: str, session_id: str | None = None
     ) -> tuple[str, List[str], float, str]:
@@ -78,10 +90,16 @@ class RagEngine:
             return heuristic_response, [], 1.0, session_id
 
         # --- Tier 2: Deterministic (exact metadata lookups with targeted filters) ---
-        deterministic_response, sources = evaluate_deterministic_rules(
-            query=query,
-            retrieve_fn=lambda query, filter: self.retrieve(query, where=filter),
-        )
+        try:
+            deterministic_response, sources = evaluate_deterministic_rules(
+                query=query,
+                retrieve_fn=lambda query, filter: self.retrieve(query, where=filter),
+            )
+        except Exception as exc:
+            if not ollama_running(self.settings.ollama_base_url):
+                logger.warning("Ollama unreachable during Tier 2 for query: %s (%s)", query[:50], exc)
+                return self._ollama_unavailable(query, session_id)
+            raise
         if deterministic_response:
             logger.info("Tier 2 (deterministic) matched for query: %s", query[:50])
             chat_sessions.add_user_message(session_id, query)
@@ -89,36 +107,42 @@ class RagEngine:
             return deterministic_response, sources or [], 1.0, session_id
 
         # --- Tier 3: Semantic RAG (LLM generation, ~500-1500ms) ---
-        search_query = query
+        try:
+            search_query = query
 
-        # Check if reformulation is needed
-        if history_text and not should_skip_reformulation(query, history_messages):
-            reformulated = reformulate_query(self.llm, query, history_text)
-            if reformulated != query:
-                search_query = reformulated
-                # Re-retrieve vector docs using the expanded search query
-        docs = self.retrieve(search_query)
+            # Check if reformulation is needed
+            if history_text and not should_skip_reformulation(query, history_messages):
+                reformulated = reformulate_query(self.llm, query, history_text)
+                if reformulated != query:
+                    search_query = reformulated
+                    # Re-retrieve vector docs using the expanded search query
+            docs = self.retrieve(search_query)
 
-        if not docs:
-            logger.info("Tier 3 (semantic): No documents retrieved for query: %s", query[:50])
-            fallback = "No pude encontrar información relevante."
+            if not docs:
+                logger.info("Tier 3 (semantic): No documents retrieved for query: %s", query[:50])
+                fallback = "No pude encontrar información relevante."
+                chat_sessions.add_user_message(session_id, query)
+                chat_sessions.add_ai_message(session_id, fallback)
+                return fallback, [], 0.0, session_id
+
+            sources = sorted({doc.metadata.get("source", "desconocido") for doc in docs})
+            context = "\n\n".join(doc.page_content for doc in docs)
+
+            answer_text = generate_answer(self.llm, search_query, context, history_text)
+
+            if _declined_answer(answer_text):
+                logger.warning("LLM declined to answer despite context: %s", search_query[:50])
+
             chat_sessions.add_user_message(session_id, query)
-            chat_sessions.add_ai_message(session_id, fallback)
-            return fallback, [], 0.0, session_id
+            chat_sessions.add_ai_message(session_id, answer_text)
 
-        sources = sorted({doc.metadata.get("source", "desconocido") for doc in docs})
-        context = "\n\n".join(doc.page_content for doc in docs)
-
-        answer_text = generate_answer(self.llm, search_query, context, history_text)
-
-        if _declined_answer(answer_text):
-            logger.warning("LLM declined to answer despite context: %s", search_query[:50])
-
-        chat_sessions.add_user_message(session_id, query)
-        chat_sessions.add_ai_message(session_id, answer_text)
-
-        logger.info("Tier 3 (semantic) generated answer for query: %s", query[:50])
-        return answer_text, sources, 0.95, session_id
+            logger.info("Tier 3 (semantic) generated answer for query: %s", query[:50])
+            return answer_text, sources, 0.95, session_id
+        except Exception as exc:
+            if not ollama_running(self.settings.ollama_base_url):
+                logger.warning("Ollama unreachable during Tier 3 for query: %s (%s)", query[:50], exc)
+                return self._ollama_unavailable(query, session_id)
+            raise
 
 
 @lru_cache

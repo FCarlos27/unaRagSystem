@@ -5,6 +5,7 @@ import argparse
 from app.core.config import get_settings
 from app.services.document_loader import load_documents, load_markdown_files
 from app.services.llm import build_embeddings_llm
+from app.services.ollama_health import verify_ollama_ready
 from app.services.text_splitter import split_documents
 from app.services.vector_store import build_vector_store
 from app.utils.logging import setup_logging
@@ -26,6 +27,7 @@ def main() -> None:
     args = parser.parse_args()
 
     settings = get_settings()
+    verify_ollama_ready(settings)
     source = args.source
 
     if args.skip_docx:

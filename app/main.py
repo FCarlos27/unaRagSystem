@@ -1,4 +1,5 @@
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 if __name__ == "__main__":
@@ -9,17 +10,28 @@ from fastapi.responses import HTMLResponse
 
 import uvicorn
 
+from app.core.config import get_settings
 from app.schemas.query import QueryRequest, QueryResponse
+from app.services.ollama_health import verify_ollama_ready
 from app.services.rag_engine import get_rag_engine
 from app.utils.logging import setup_logging, get_logger
 
 logger = setup_logging()
 query_logger = get_logger("query_route")
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Gate startup: abort unless Ollama is reachable with the required models."""
+    verify_ollama_ready(get_settings())
+    yield
+
+
 app = FastAPI(
     title="UNASUCRE/UNASEC RAG Microservice",
     description="Semantic search over official university documents.",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 
@@ -53,4 +65,5 @@ def chat_widget() -> HTMLResponse:
 
 
 if __name__ == "__main__":
+    verify_ollama_ready(get_settings())
     uvicorn.run(app, host="0.0.0.0", port=8000)
