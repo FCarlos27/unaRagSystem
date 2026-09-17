@@ -231,8 +231,7 @@ def evaluate_deterministic_rules(
     for rule in DETERMINISTIC_RULES:
         if rule.pattern.search(norm_query):
             # Only fetch documents from the exact source file required by this rule
-            docs = retrieve_fn(query, rule.db_filter)
-
+            docs = retrieve_fn(rule.db_filter)
             response, sources = rule.resolver(norm_query, docs)
             if response:
                 return response, sources

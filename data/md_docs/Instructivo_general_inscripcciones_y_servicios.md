@@ -103,6 +103,7 @@ unidad: "Dirección de Registro y Control de Estudios"
 
 ## 7. Equivalencias de Estudios
 
+- Las equivalencias son un proceso académico y administrativo que reconoce las asignaturas que ya aprobaste en otra institución o carrera para validarlas en tu plan de estudios actual, evitando que debas cursarlas 
 - Los aspirantes interesados deben primero inscribir y aprobar el Curso Introductorio con su documentación de bachiller.
 - Se aceptan equivalencias de cualquier institución y carrera reconocida.
 - La solicitud se realiza cuando la Coordinación de Equivalencias convoque el proceso. Si el portafolio no tiene asignaturas otorgadas por equivalencia cargadas, dicho proceso no ha sido finalizado por la Coordinación.

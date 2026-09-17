@@ -1,7 +1,15 @@
 # UNASUCRE/UNASEC RAG Microservice (MVP)
 
-Semantic search microservice over official university documents, based on
-Retrieval-Augmented Generation (RAG). See [PRD.MD](./PRD.MD).
+Conversational assistant for the **Centro Local Sucre** of the
+Universidad Nacional Abierta (UNA). Answers student questions about
+registration processes, fees and banks, academic requirements, and
+official contact points, grounded strictly on the university's own
+Markdown knowledge base via Retrieval-Augmented Generation (RAG).
+
+> Scope: this MVP serves **Sucre only**. Queries about any other UNA
+> center are redirected to the official directory at www.unasec.com.
+
+See [PRD.MD](./PRD.MD) for the full product brief.
 
 ## Tech Stack
 
@@ -10,8 +18,8 @@ Retrieval-Augmented Generation (RAG). See [PRD.MD](./PRD.MD).
 - **LLM:** Llama-3.2-3B (local via Ollama)
 - **Vector DB:** ChromaDB (local)
 - **Orchestration:** LangChain
-- **Document parsing:** python-docx (.docx) + JSON ingestion
-- **Chunking:** RecursiveCharacterTextSplitter (LangChain)
+- **Document parsing:** python-docx (.docx) + Markdown (.md) sources
+- **Chunking:** MarkdownHeaderTextSplitter for section-aware chunks (Recursive fallback for docx)
 - **Infrastructure:** Docker
 
 ## Architecture: Waterfall Router Pattern
@@ -45,13 +53,13 @@ Answer returned with sources & confidence
 | Tier | Description | Typical Latency | Implementation |
 |------|-------------|-----------------|----------------|
 | Heuristics | Greetings, thanks, farewells | <1ms | `app/services/rules.py` (`match_heuristic()`) |
-| Deterministic | Bank accounts, coordinator emails | 50-150ms | `app/services/rules.py` (`resolve_deterministic()`) |
+| Deterministic | Sucre directory info, banks/contact datablocks | 50-150ms | `app/services/rules.py` (`evaluate_deterministic_rules()`) |
 | Semantic RAG | Vector retrieval + Llama 3.2 | ~500-1500ms | `app/services/rag_engine.py` (`RagEngine.answer()`) |
 
 ### Implementation Notes
 
 - **Heuristics** (`match_heuristic`): Uses anchored regex patterns to detect conversational phrases. Bypasses vector DB entirely.
-- **Deterministic** (`resolve_deterministic`): Uses keyword patterns plus metadata inspection (JSON documents) to return exact banking or contact data. Requires vector search results but skips LLM generation.
+- **Deterministic** (`evaluate_deterministic_rules`): regex-triggered rules (bank, directory, other-center redirect) that retrieve only the exact source file from ChromaDB (no LLM). The `match_other_centro` rule redirects non-Sucre queries to www.unasec.com before any retrieval.
 - **Semantic RAG**: Full retrieval-augmented generation pipeline. Includes query reformulation for follow-up questions (skipped for heuristic matches or empty history).
 
 All tiers update session history consistently for multi-turn conversations.
@@ -63,34 +71,62 @@ All tiers update session history consistently for multi-turn conversations.
 ├── app/
 │   ├── core/             # Configuration (pydantic-settings)
 │   ├── schemas/          # Pydantic request/response models
-│   ├── services/         # RAG pipeline (loader, splitter, embeddings, store, llm, rules, rag_engine)
-│   └── utils/            # Logging
+│   ├── services/         # RAG pipeline (loader, splitter, embeddings, store, llm, ollama_health, rules, rag_engine)
+│   ├── static/           # Chat widget (HTML)
+│   ├── images/           # Screenshots used in this README
+│   └── utils/            # Logging, unanswered-query log
 ├── data/
-│   ├── raw_docx/         # Source .docx instructions for ingestion
-│   ├── md_docs/          # Markdown knowledge base (processes + Sucre directory)
-│   └── chroma_db/        # Persistent ChromaDB storage
+│   ├── raw_docx/         # Optional .docx instructions
+│   ├── md_docs/          # Markdown knowledge base (master guide + Sucre directory)
+│   ├── chroma_db/        # Persistent ChromaDB storage
+│   └── unanswered_queries.jsonl   # Logged no-context queries
 ├── scripts/              # Ingestion script
-├── tests/
+├── tests/                # Unit tests (pytest)
 ├── Dockerfile
 ├── docker-compose.yml
-├── requirements.txt
-└── .env.example
+└── requirements.txt
 ```
 
 ## Setup
 
-1. Ensure Ollama is running locally and the models are available:
-   `ollama pull nomic-embed-text` and `ollama pull llama3.2:3b`
-2. `cp .env.example .env`.
-3. Drop official `.docx` instructions into `data/raw_docx/` and Markdown files into `data/md_docs/`.
-4. Ingest documents: `python scripts/ingest.py`.
-5. Run the API: `uvicorn app.main:app --reload` or `docker compose up --build`.
+Requirements: Python 3.12+ and [Ollama](https://ollama.com/) running locally.
+
+1. Create and activate a virtual environment, then install dependencies:
+   ```bash
+   python -m venv .venv && source .venv/bin/activate
+   pip install -r requirements.txt
+   ```
+2. Configuration is optional — sane defaults are built into `app/core/config.py`.
+   To override, create `.env` (see the table below) and it is loaded automatically.
+3. Verify Ollama and models (the app and the ingestion script refuse to start otherwise):
+   ```bash
+   ollama serve          # in a separate terminal
+   ollama pull nomic-embed-text
+   ollama pull llama3.2:3b
+   ```
+4. Add official Markdown docs to `data/md_docs/` (and optional `.docx` to `data/raw_docx/`).
+5. Ingest into ChromaDB: `python scripts/ingest.py --skip-docx`
+6. Run the API: `uvicorn app.main:app --reload` — or `docker compose up --build`
+   (Docker requires Ollama reachable on the host at `OLLAMA_BASE_URL`).
+
+### Environment variables
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server endpoint |
+| `OLLAMA_EMBED_MODEL` | `nomic-embed-text` | Embedding model (must be pulled) |
+| `OLLAMA_LLM_MODEL` | `llama3.2:3b` | Chat model (must be pulled) |
+| `CHROMA_DB_DIR` | `data/chroma_db` | ChromaDB persistence path |
+| `CHROMA_COLLECTION_NAME` | `unasucre_documents` | Collection name |
+| `CHUNK_SIZE` / `CHUNK_OVERLAP` | `1000` / `180` | Document chunking |
+| `RETRIEVAL_TOP_K` | `4` | Docs retrieved per query |
 
 ## API
 
 - `POST /api/v1/query` — body: `{"query": "¿Cuáles son los requisitos de inscripción?"}`
   - Omit `session_id` to start a new conversation (one is returned in the response).
   - Reuse the returned `session_id` to keep conversation context for follow-up questions.
+- `GET /chat` — the web chat widget (served from `app/static/chat.html`); it posts to `/api/v1/query` in the browser.
 - `GET /health`
 
 Conversation history is stored in memory (resets on restart).
